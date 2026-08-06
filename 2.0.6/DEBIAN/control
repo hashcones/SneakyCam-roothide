@@ -1,10 +1,8 @@
 Package: com.spark.sneakycam
-Name: SneakyCam
-Depends: mobilesubstrate, preferenceloader
-Architecture: iphoneos-arm
-Description: Discretely take a photo or record a video from anywhere, even with your screen off.
-Maintainer: Spark
-Author: Spark
+Name: SneakyCam (RootHide)
+Version: 2.0.6~roothide
+Architecture: iphoneos-arm64e
+Maintainer: hashcones
+Depends: firmware (>= 15.0), preferenceloader, com.roothide.patchloader
 Section: Tweaks
-Version: 2.0.6
-Installed-Size: 560
+Description: Discreet video recording tweak updated for RootHide arm64e.
