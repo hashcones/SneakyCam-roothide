@@ -1,0 +1,10 @@
+Package: com.spark.sneakycam
+Name: SneakyCam
+Depends: mobilesubstrate, preferenceloader
+Architecture: iphoneos-arm
+Description: Discretely take a photo or record a video from anywhere, even with your screen off.
+Maintainer: Spark
+Author: Spark
+Section: Tweaks
+Version: 2.0.6
+Installed-Size: 560

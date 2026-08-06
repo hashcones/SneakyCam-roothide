@@ -1,0 +1,10 @@
+Package: preferenceloader
+Description: load preferences in style
+Version: 2.2.8
+Maintainer: Dhinak G <dhinak@dhinak.net>
+Author: Dhinak G <dhinak@dhinak.net>
+Architecture: iphoneos-arm64
+Name: PreferenceLoader
+Depends: mobilesubstrate
+Section: System
+Installed-Size: 371
