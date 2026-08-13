@@ -1,8 +1,0 @@
-Package: com.spark.sneakycam
-Name: SneakyCam (RootHide)
-Version: 2.0.6~roothide
-Architecture: iphoneos-arm64e
-Maintainer: hashcones
-Depends: firmware (>= 15.0), preferenceloader, com.roothide.patchloader
-Section: Tweaks
-Description: Discreet video recording tweak updated for RootHide arm64e.
