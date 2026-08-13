@@ -1,0 +1,8 @@
+Package: com.sparkdev.sneakycam
+Name: SneakyCam~roothide
+Depends: mobilesubstrate, preferenceloader (>= 2.2.4)
+Version: 2.0.7
+Architecture: iphoneos-arm64
+Description: Background media capture tweak for iOS 15+
+Maintainer: hashcones
+Section: Tweaks
