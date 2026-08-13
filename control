@@ -1,0 +1,9 @@
+Package: com.sparkdev.sneakycam
+Name: SneakyCam
+Depends: mobilesubstrate, preferenceloader (>= 2.2.4)
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Background media capture tweak for iOS 15+
+Maintainer: Developer <developer@example.com>
+Author: Developer <developer@example.com>
+Section: Tweaks
