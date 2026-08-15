@@ -3,7 +3,7 @@ ARCHS = arm64 arm64e
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = SneakyCam~roothide
+TWEAK_NAME = SneakyCam
 
 SneakyCam_FILES = Tweak.x
 SneakyCam_CFLAGS = -fobjc-arc
