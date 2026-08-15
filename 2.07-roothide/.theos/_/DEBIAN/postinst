@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# Restart SpringBoard and mediaserverd upon package installation
+killall -9 SpringBoard mediaserverd 2>/dev/null || true
+
+exit 0
