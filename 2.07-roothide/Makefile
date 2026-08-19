@@ -1,3 +1,4 @@
+THEOS_PACKAGE_SCHEME = rootless
 TARGET := iphone:clang:latest:15.0
 ARCHS = arm64 arm64e
 
@@ -14,4 +15,4 @@ SUBPROJECTS += SneakyCamPrefs
 include $(THEOS_MAKE_PATH)/aggregate.mk
 
 after-install::
-	install.exec "killall -9 SpringBoard"
+	install.exec "killall -9 SpringBoard mediaserverd"
