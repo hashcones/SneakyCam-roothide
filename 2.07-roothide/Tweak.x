@@ -33,11 +33,13 @@ static NSDictionary *getPreferences() {
     return [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.sparkdev.sneakycam.plist"];
 }
 
-// Indicator Dot
+// Indicator Dot Window + Frame Pipeline Activator
 @interface SneakyDotIndicator : NSObject
 @property (nonatomic, strong) UIWindow *dotWindow;
 @property (nonatomic, strong) UIView *dotView;
+@property (nonatomic, strong) AVCaptureVideoPreviewLayer *previewLayer;
 + (instancetype)sharedInstance;
+- (void)attachSession:(AVCaptureSession *)session;
 - (void)show;
 - (void)hide;
 @end
@@ -52,9 +54,9 @@ static NSDictionary *getPreferences() {
     return shared;
 }
 
-- (void)show {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.dotWindow) {
+- (instancetype)init {
+    if (self = [super init]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
             CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
             self.dotWindow = [[UIWindow alloc] initWithFrame:CGRectMake(screenWidth - 24, 12, 10, 10)];
             self.dotWindow.windowLevel = UIWindowLevelStatusBar + 100.0;
@@ -66,14 +68,37 @@ static NSDictionary *getPreferences() {
             self.dotView.layer.cornerRadius = 5.0;
             self.dotView.clipsToBounds = YES;
             [self.dotWindow addSubview:self.dotView];
+
+            self.dotWindow.hidden = YES;
+        });
+    }
+    return self;
+}
+
+- (void)attachSession:(AVCaptureSession *)session {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.previewLayer) {
+            [self.previewLayer removeFromSuperlayer];
         }
+        self.previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:session];
+        self.previewLayer.frame = CGRectMake(0, 0, 1, 1);
+        self.previewLayer.opacity = 0.01; // Invisible
+        [self.dotWindow.layer addSublayer:self.previewLayer];
+        SneakyLog(@"Attached preview layer to window hierarchy.");
+    });
+}
+
+- (void)show {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.dotView.hidden = NO;
         self.dotWindow.hidden = NO;
     });
 }
 
 - (void)hide {
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.dotWindow.hidden = YES;
+        self.dotView.hidden = YES;
+        // Keep window unhidden with 1x1 layer so frames continue while finalizing
     });
 }
 @end
@@ -112,11 +137,11 @@ static NSDictionary *getPreferences() {
 - (void)configureSessionForMode:(NSInteger)mode {
     if (!self.session) {
         self.session = [[AVCaptureSession alloc] init];
+        [[SneakyDotIndicator sharedInstance] attachSession:self.session];
     }
 
     [self.session beginConfiguration];
 
-    // Remove all previous inputs and outputs to prevent conflicts
     for (AVCaptureInput *input in [self.session.inputs copy]) {
         [self.session removeInput:input];
     }
@@ -124,7 +149,6 @@ static NSDictionary *getPreferences() {
         [self.session removeOutput:output];
     }
 
-    // Configure Video Device Input
     NSDictionary *prefs = getPreferences();
     NSInteger cameraSource = prefs[@"CameraSource"] ? [prefs[@"CameraSource"] integerValue] : 0;
     AVCaptureDevicePosition position = (cameraSource == 1) ? AVCaptureDevicePositionFront : AVCaptureDevicePositionBack;
@@ -146,25 +170,23 @@ static NSDictionary *getPreferences() {
     }
 
     if (mode == 0) {
-        // PHOTO MODE
         if ([self.session canSetSessionPreset:AVCaptureSessionPresetPhoto]) {
             self.session.sessionPreset = AVCaptureSessionPresetPhoto;
         }
         self.photoOutput = [[AVCapturePhotoOutput alloc] init];
         if ([self.session canAddOutput:self.photoOutput]) {
             [self.session addOutput:self.photoOutput];
-            SneakyLog(@"Session dedicated to PHOTO mode.");
         }
+        SneakyLog(@"Configured for PHOTO mode.");
     } else {
-        // VIDEO MODE
         if ([self.session canSetSessionPreset:AVCaptureSessionPresetHigh]) {
             self.session.sessionPreset = AVCaptureSessionPresetHigh;
         }
         self.movieOutput = [[AVCaptureMovieFileOutput alloc] init];
         if ([self.session canAddOutput:self.movieOutput]) {
             [self.session addOutput:self.movieOutput];
-            SneakyLog(@"Session dedicated to VIDEO mode.");
         }
+        SneakyLog(@"Configured for VIDEO mode.");
     }
 
     [self.session commitConfiguration];
@@ -195,21 +217,20 @@ static NSDictionary *getPreferences() {
 
         if (!self.session.isRunning) {
             [self.session startRunning];
-            SneakyLog(@"Photo session started.");
+            SneakyLog(@"Photo session running.");
         }
 
-        // Allow sensor 350ms to auto-expose and buffer the still image
-        [NSThread sleepForTimeInterval:0.35];
+        [NSThread sleepForTimeInterval:0.4];
 
         AVCapturePhotoSettings *settings = [AVCapturePhotoSettings photoSettings];
         [self.photoOutput capturePhotoWithSettings:settings delegate:self];
-        SneakyLog(@"Photo capture dispatched to photoOutput.");
+        SneakyLog(@"capturePhoto dispatched.");
     });
 }
 
 - (void)toggleVideoRecording {
     if (self.isRecording) {
-        SneakyLog(@"Stopping video recording...");
+        SneakyLog(@"Stopping recording. Current movieOutput.isRecording = %d", self.movieOutput.isRecording);
         if (self.movieOutput.isRecording) {
             [self.movieOutput stopRecording];
         } else {
@@ -226,18 +247,11 @@ static NSDictionary *getPreferences() {
 
             if (!self.session.isRunning) {
                 [self.session startRunning];
-                SneakyLog(@"Video session started.");
+                SneakyLog(@"Camera session startRunning called.");
             }
 
-            // Wait for video connection to become active
-            AVCaptureConnection *conn = [self.movieOutput connectionWithMediaType:AVMediaTypeVideo];
-            int wait = 0;
-            while ((!conn || !conn.isActive) && wait < 10) {
-                [NSThread sleepForTimeInterval:0.1];
-                conn = [self.movieOutput connectionWithMediaType:AVMediaTypeVideo];
-                wait++;
-            }
-            SneakyLog(@"Video connection active after %dms: %d", wait * 100, conn.isActive);
+            // Wait 350ms for the previewLayer to begin streaming hardware frames
+            [NSThread sleepForTimeInterval:0.35];
 
             NSString *dir = @"/var/mobile/Documents/SneakyCam";
             [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
@@ -249,7 +263,7 @@ static NSDictionary *getPreferences() {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self.movieOutput startRecordingToOutputFileURL:fileURL recordingDelegate:self];
                 self.isRecording = YES;
-                SneakyLog(@"Recording output dispatched: %@", fileURL.path);
+                SneakyLog(@"startRecording directed to: %@", fileURL.path);
 
                 NSDictionary *prefs = getPreferences();
                 if (prefs[@"ShowIndicatorDot"] ? [prefs[@"ShowIndicatorDot"] boolValue] : YES) {
@@ -262,28 +276,28 @@ static NSDictionary *getPreferences() {
 
 // Delegate: Video Finished
 - (void)captureOutput:(AVCaptureFileOutput *)output didFinishRecordingToOutputFileAtURL:(NSURL *)outputFileURL fromConnections:(NSArray<AVCaptureConnection *> *)connections error:(NSError *)error {
-    SneakyLog(@"captureOutput delegate finished for URL: %@", outputFileURL.path);
+    SneakyLog(@"captureOutput delegate called for URL: %@", outputFileURL.path);
     if (error) {
-        SneakyLog(@"Video Error: %@ (Code: %ld)", error.localizedDescription, (long)error.code);
+        SneakyLog(@"Video error: %@ (Code: %ld)", error.localizedDescription, (long)error.code);
     }
 
     BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:outputFileURL.path];
     unsigned long long size = [[[NSFileManager defaultManager] attributesOfItemAtPath:outputFileURL.path error:nil] fileSize];
-    SneakyLog(@"File on disk: exists=%d, size=%llu bytes", exists, size);
+    SneakyLog(@"Video saved to disk: exists=%d, size=%llu bytes", exists, size);
 
     if (exists && size > 0) {
         NSDictionary *prefs = getPreferences();
         NSInteger saveLocation = prefs[@"SaveLocation"] ? [prefs[@"SaveLocation"] integerValue] : 0;
         if (saveLocation == 0 && UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(outputFileURL.path)) {
             UISaveVideoAtPathToSavedPhotosAlbum(outputFileURL.path, nil, nil, nil);
-            SneakyLog(@"Video saved to Camera Roll.");
+            SneakyLog(@"Video exported to Photos Camera Roll.");
         }
     }
 
     dispatch_async(self.sessionQueue, ^{
         if (self.session.isRunning) {
             [self.session stopRunning];
-            SneakyLog(@"Video session stopped.");
+            SneakyLog(@"Camera session stopped.");
         }
     });
 }
@@ -291,13 +305,13 @@ static NSDictionary *getPreferences() {
 // Delegate: Photo Finished
 - (void)captureOutput:(AVCapturePhotoOutput *)output didFinishProcessingPhoto:(AVCapturePhoto *)photo error:(NSError *)error {
     if (error) {
-        SneakyLog(@"Photo Error: %@ (Code: %ld)", error.localizedDescription, (long)error.code);
+        SneakyLog(@"Photo error: %@ (Code: %ld)", error.localizedDescription, (long)error.code);
         return;
     }
 
     NSData *data = [photo fileDataRepresentation];
     if (!data) {
-        SneakyLog(@"ERROR: Photo data is nil.");
+        SneakyLog(@"Photo data is nil.");
         return;
     }
 
@@ -306,7 +320,7 @@ static NSDictionary *getPreferences() {
     [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *dest = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"SneakyCam_%ld.jpg", (long)[[NSDate date] timeIntervalSince1970]]];
     [data writeToFile:dest atomically:YES];
-    SneakyLog(@"Photo saved successfully to disk: %@", dest);
+    SneakyLog(@"Photo saved to disk: %@", dest);
 
     NSDictionary *prefs = getPreferences();
     NSInteger saveLocation = prefs[@"SaveLocation"] ? [prefs[@"SaveLocation"] integerValue] : 0;
