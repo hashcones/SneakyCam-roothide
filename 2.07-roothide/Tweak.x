@@ -33,11 +33,13 @@ static NSDictionary *getPreferences() {
     return [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.sparkdev.sneakycam.plist"];
 }
 
-// Indicator Dot Window
+// Full-Screen Transparent Window (Bypasses Reason 1 Interruption)
 @interface SneakyDotIndicator : NSObject
 @property (nonatomic, strong) UIWindow *dotWindow;
 @property (nonatomic, strong) UIView *dotView;
+@property (nonatomic, strong) AVCaptureVideoPreviewLayer *previewLayer;
 + (instancetype)sharedInstance;
+- (void)attachSession:(AVCaptureSession *)session;
 - (void)show;
 - (void)hide;
 @end
@@ -55,33 +57,50 @@ static NSDictionary *getPreferences() {
 - (instancetype)init {
     if (self = [super init]) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
-            self.dotWindow = [[UIWindow alloc] initWithFrame:CGRectMake(screenWidth - 24, 12, 10, 10)];
+            CGRect screenBounds = [UIScreen mainScreen].bounds;
+            self.dotWindow = [[UIWindow alloc] initWithFrame:screenBounds];
             self.dotWindow.windowLevel = UIWindowLevelStatusBar + 100.0;
             self.dotWindow.backgroundColor = [UIColor clearColor];
             self.dotWindow.userInteractionEnabled = NO;
 
-            self.dotView = [[UIView alloc] initWithFrame:self.dotWindow.bounds];
+            // Indicator red dot view (top right corner)
+            self.dotView = [[UIView alloc] initWithFrame:CGRectMake(screenBounds.size.width - 24, 12, 10, 10)];
             self.dotView.backgroundColor = [UIColor systemRedColor];
             self.dotView.layer.cornerRadius = 5.0;
             self.dotView.clipsToBounds = YES;
+            self.dotView.hidden = YES;
             [self.dotWindow addSubview:self.dotView];
 
-            self.dotWindow.hidden = YES;
+            // Keep window active on the render server
+            self.dotWindow.hidden = NO;
         });
     }
     return self;
 }
 
+- (void)attachSession:(AVCaptureSession *)session {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.previewLayer) {
+            [self.previewLayer removeFromSuperlayer];
+        }
+        self.previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:session];
+        self.previewLayer.frame = [UIScreen mainScreen].bounds;
+        self.previewLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+        self.previewLayer.opacity = 0.001; // Completely invisible to user, visible to render server
+        [self.dotWindow.layer insertSublayer:self.previewLayer atIndex:0];
+        SneakyLog(@"Attached full-screen preview layer (bypasses Reason 1).");
+    });
+}
+
 - (void)show {
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.dotWindow.hidden = NO;
+        self.dotView.hidden = NO;
     });
 }
 
 - (void)hide {
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.dotWindow.hidden = YES;
+        self.dotView.hidden = YES;
     });
 }
 @end
@@ -139,6 +158,10 @@ static NSDictionary *getPreferences() {
         SneakyLog(@"WARNING: AVCaptureSession was interrupted (Reason: %ld)", (long)reason);
     }];
 
+    [nc addObserverForName:AVCaptureSessionInterruptionEndedNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        SneakyLog(@"SUCCESS: AVCaptureSession interruption ended. Resuming frames.");
+    }];
+
     [nc addObserverForName:AVCaptureSessionRuntimeErrorNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
         NSError *error = note.userInfo[AVCaptureSessionErrorKey];
         SneakyLog(@"ERROR: AVCaptureSession runtime error: %@", error.localizedDescription);
@@ -148,16 +171,10 @@ static NSDictionary *getPreferences() {
 - (void)configureSessionForMode:(NSInteger)mode {
     if (!self.session) {
         self.session = [[AVCaptureSession alloc] init];
+        [[SneakyDotIndicator sharedInstance] attachSession:self.session];
     }
 
     [self.session beginConfiguration];
-
-    // 1. Enable Wide Color Gamut (P3) if supported
-    if (@available(iOS 10.0, *)) {
-        if ([self.session respondsToSelector:@selector(setAutomaticallyConfiguresCaptureDeviceForWideColor:)]) {
-            self.session.automaticallyConfiguresCaptureDeviceForWideColor = YES;
-        }
-    }
 
     for (AVCaptureInput *input in [self.session.inputs copy]) {
         [self.session removeInput:input];
@@ -180,44 +197,27 @@ static NSDictionary *getPreferences() {
     }
 
     if (videoDevice) {
-        // 2. Configure Native Device Properties (Focus, Exposure, White Balance, Frame Rate)
         NSError *lockErr = nil;
         if ([videoDevice lockForConfiguration:&lockErr]) {
-            // Continuous Autofocus
             if ([videoDevice isFocusModeSupported:AVCaptureFocusModeContinuousAutoFocus]) {
                 videoDevice.focusMode = AVCaptureFocusModeContinuousAutoFocus;
             }
-            if ([videoDevice isSmoothAutoFocusSupported]) {
-                videoDevice.smoothAutoFocusEnabled = YES;
-            }
-
-            // Continuous Auto-Exposure
             if ([videoDevice isExposureModeSupported:AVCaptureExposureModeContinuousAutoExposure]) {
                 videoDevice.exposureMode = AVCaptureExposureModeContinuousAutoExposure;
             }
-
-            // Continuous Auto-White Balance
             if ([videoDevice isWhiteBalanceModeSupported:AVCaptureWhiteBalanceModeContinuousAutoWhiteBalance]) {
                 videoDevice.whiteBalanceMode = AVCaptureWhiteBalanceModeContinuousAutoWhiteBalance;
             }
-
-            // Low Light Boost
-            if ([videoDevice isLowLightBoostSupported]) {
-                videoDevice.automaticallyEnablesLowLightBoostWhenAvailable = YES;
-            }
-
-            // Lock Frame Rate to 30 FPS
             videoDevice.activeVideoMinFrameDuration = CMTimeMake(1, 30);
             videoDevice.activeVideoMaxFrameDuration = CMTimeMake(1, 30);
-
             [videoDevice unlockForConfiguration];
-            SneakyLog(@"Configured 3A (AF/AE/AWB), 30fps lock, and Low Light Boost on: %@", videoDevice.localizedName);
         }
 
         NSError *inputErr = nil;
         AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:videoDevice error:&inputErr];
         if (input && [self.session canAddInput:input]) {
             [self.session addInput:input];
+            SneakyLog(@"Attached camera: %@", videoDevice.localizedName);
         }
     }
 
@@ -228,11 +228,10 @@ static NSDictionary *getPreferences() {
         }
         self.photoOutput = [[AVCapturePhotoOutput alloc] init];
         self.photoOutput.highResolutionCaptureEnabled = YES;
-
         if ([self.session canAddOutput:self.photoOutput]) {
             [self.session addOutput:self.photoOutput];
         }
-        SneakyLog(@"Configured for PHOTO mode (High Res Enabled).");
+        SneakyLog(@"Configured for PHOTO mode.");
     } else {
         // VIDEO MODE (4K / 1080p / 720p)
         NSString *requestedPreset = prefs[@"VideoQuality"] ?: AVCaptureSessionPreset3840x2160;
@@ -271,7 +270,6 @@ static NSDictionary *getPreferences() {
         if ([self.session canAddOutput:self.videoDataOutput]) {
             [self.session addOutput:self.videoDataOutput];
             
-            // 3. Configure Hardware Stabilization & Orientation
             AVCaptureConnection *connection = [self.videoDataOutput connectionWithMediaType:AVMediaTypeVideo];
             if (connection) {
                 if ([connection isVideoOrientationSupported]) {
@@ -279,7 +277,6 @@ static NSDictionary *getPreferences() {
                 }
                 if ([connection isVideoStabilizationSupported]) {
                     connection.preferredVideoStabilizationMode = AVCaptureVideoStabilizationModeCinematic;
-                    SneakyLog(@"Cinematic Hardware Video Stabilization enabled.");
                 }
                 connection.enabled = YES;
             }
@@ -317,7 +314,7 @@ static NSDictionary *getPreferences() {
             SneakyLog(@"Photo session running.");
         }
 
-        [NSThread sleepForTimeInterval:0.35];
+        [NSThread sleepForTimeInterval:0.4];
 
         AVCapturePhotoSettings *settings = [AVCapturePhotoSettings photoSettings];
         settings.highResolutionPhotoEnabled = YES;
@@ -391,7 +388,6 @@ static NSDictionary *getPreferences() {
             NSError *err = nil;
             self.assetWriter = [AVAssetWriter assetWriterWithURL:self.currentOutputURL fileType:AVFileTypeMPEG4 error:&err];
 
-            // 4. Standard BT.709 Color Space & Encoder Compression Settings
             NSDictionary *colorProperties = @{
                 AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
                 AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
