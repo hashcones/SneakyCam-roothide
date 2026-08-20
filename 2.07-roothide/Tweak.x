@@ -78,12 +78,13 @@ static NSDictionary *getPreferences() {
 }
 @end
 
-// Recorder Singleton
+// Recorder Controller
 @interface SneakyRecorder : NSObject <AVCaptureFileOutputRecordingDelegate, AVCapturePhotoCaptureDelegate>
 @property (nonatomic, strong) AVCaptureSession *session;
 @property (nonatomic, strong) AVCaptureMovieFileOutput *movieOutput;
 @property (nonatomic, strong) AVCapturePhotoOutput *photoOutput;
 @property (nonatomic, strong) dispatch_queue_t sessionQueue;
+@property (nonatomic, assign) NSInteger currentMode;
 @property (nonatomic, assign) BOOL isRecording;
 + (instancetype)sharedInstance;
 - (void)triggerCapture;
@@ -103,59 +104,71 @@ static NSDictionary *getPreferences() {
 - (instancetype)init {
     if (self = [super init]) {
         self.sessionQueue = dispatch_queue_create("com.sparkdev.sneakycam.sessionQueue", DISPATCH_QUEUE_SERIAL);
-        [self setupCaptureSession];
+        self.currentMode = -1;
     }
     return self;
 }
 
-- (void)setupCaptureSession {
-    dispatch_async(self.sessionQueue, ^{
-        SneakyLog(@"Configuring AVCaptureSession...");
+- (void)configureSessionForMode:(NSInteger)mode {
+    if (!self.session) {
         self.session = [[AVCaptureSession alloc] init];
-        [self.session beginConfiguration];
+    }
 
-        self.session.sessionPreset = AVCaptureSessionPresetHigh;
+    [self.session beginConfiguration];
 
-        NSDictionary *prefs = getPreferences();
-        NSInteger cameraSource = prefs[@"CameraSource"] ? [prefs[@"CameraSource"] integerValue] : 0;
-        AVCaptureDevicePosition position = (cameraSource == 1) ? AVCaptureDevicePositionFront : AVCaptureDevicePositionBack;
+    // Remove all previous inputs and outputs to prevent conflicts
+    for (AVCaptureInput *input in [self.session.inputs copy]) {
+        [self.session removeInput:input];
+    }
+    for (AVCaptureOutput *output in [self.session.outputs copy]) {
+        [self.session removeOutput:output];
+    }
 
-        AVCaptureDevice *videoDevice = nil;
-        if (@available(iOS 10.0, *)) {
-            AVCaptureDeviceDiscoverySession *discovery = [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:@[AVCaptureDeviceTypeBuiltInWideAngleCamera] mediaType:AVMediaTypeVideo position:position];
-            videoDevice = discovery.devices.firstObject;
+    // Configure Video Device Input
+    NSDictionary *prefs = getPreferences();
+    NSInteger cameraSource = prefs[@"CameraSource"] ? [prefs[@"CameraSource"] integerValue] : 0;
+    AVCaptureDevicePosition position = (cameraSource == 1) ? AVCaptureDevicePositionFront : AVCaptureDevicePositionBack;
+
+    AVCaptureDevice *videoDevice = nil;
+    if (@available(iOS 10.0, *)) {
+        AVCaptureDeviceDiscoverySession *discovery = [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:@[AVCaptureDeviceTypeBuiltInWideAngleCamera] mediaType:AVMediaTypeVideo position:position];
+        videoDevice = discovery.devices.firstObject;
+    }
+    if (!videoDevice) {
+        videoDevice = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+    }
+
+    if (videoDevice) {
+        AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:videoDevice error:nil];
+        if (input && [self.session canAddInput:input]) {
+            [self.session addInput:input];
         }
-        if (!videoDevice) {
-            videoDevice = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        }
+    }
 
-        if (videoDevice) {
-            NSError *err = nil;
-            AVCaptureDeviceInput *videoInput = [AVCaptureDeviceInput deviceInputWithDevice:videoDevice error:&err];
-            if (videoInput && [self.session canAddInput:videoInput]) {
-                [self.session addInput:videoInput];
-                SneakyLog(@"Video device input connected: %@", videoDevice.localizedName);
-            } else {
-                SneakyLog(@"Failed adding video input: %@", err.localizedDescription);
-            }
+    if (mode == 0) {
+        // PHOTO MODE
+        if ([self.session canSetSessionPreset:AVCaptureSessionPresetPhoto]) {
+            self.session.sessionPreset = AVCaptureSessionPresetPhoto;
         }
-
-        // Add Movie Output
-        self.movieOutput = [[AVCaptureMovieFileOutput alloc] init];
-        if ([self.session canAddOutput:self.movieOutput]) {
-            [self.session addOutput:self.movieOutput];
-            SneakyLog(@"Movie output attached.");
-        }
-
-        // Add Photo Output
         self.photoOutput = [[AVCapturePhotoOutput alloc] init];
         if ([self.session canAddOutput:self.photoOutput]) {
             [self.session addOutput:self.photoOutput];
+            SneakyLog(@"Session dedicated to PHOTO mode.");
         }
+    } else {
+        // VIDEO MODE
+        if ([self.session canSetSessionPreset:AVCaptureSessionPresetHigh]) {
+            self.session.sessionPreset = AVCaptureSessionPresetHigh;
+        }
+        self.movieOutput = [[AVCaptureMovieFileOutput alloc] init];
+        if ([self.session canAddOutput:self.movieOutput]) {
+            [self.session addOutput:self.movieOutput];
+            SneakyLog(@"Session dedicated to VIDEO mode.");
+        }
+    }
 
-        [self.session commitConfiguration];
-        SneakyLog(@"AVCaptureSession configuration committed.");
-    });
+    [self.session commitConfiguration];
+    self.currentMode = mode;
 }
 
 - (void)triggerCapture {
@@ -178,23 +191,28 @@ static NSDictionary *getPreferences() {
 
 - (void)capturePhoto {
     dispatch_async(self.sessionQueue, ^{
+        [self configureSessionForMode:0];
+
         if (!self.session.isRunning) {
             [self.session startRunning];
-            [NSThread sleepForTimeInterval:0.25];
+            SneakyLog(@"Photo session started.");
         }
+
+        // Allow sensor 350ms to auto-expose and buffer the still image
+        [NSThread sleepForTimeInterval:0.35];
+
         AVCapturePhotoSettings *settings = [AVCapturePhotoSettings photoSettings];
         [self.photoOutput capturePhotoWithSettings:settings delegate:self];
-        SneakyLog(@"Photo capture request sent.");
+        SneakyLog(@"Photo capture dispatched to photoOutput.");
     });
 }
 
 - (void)toggleVideoRecording {
     if (self.isRecording) {
-        SneakyLog(@"Stopping video recording... (movieOutput.isRecording = %d)", self.movieOutput.isRecording);
+        SneakyLog(@"Stopping video recording...");
         if (self.movieOutput.isRecording) {
             [self.movieOutput stopRecording];
         } else {
-            SneakyLog(@"WARNING: movieOutput was not active. Stopping session.");
             dispatch_async(self.sessionQueue, ^{
                 if (self.session.isRunning) [self.session stopRunning];
             });
@@ -204,24 +222,22 @@ static NSDictionary *getPreferences() {
     } else {
         SneakyLog(@"Starting video recording...");
         dispatch_async(self.sessionQueue, ^{
-            if (!self.session) {
-                [self setupCaptureSession];
-            }
+            [self configureSessionForMode:1];
 
             if (!self.session.isRunning) {
                 [self.session startRunning];
-                SneakyLog(@"Camera session startRunning called.");
+                SneakyLog(@"Video session started.");
             }
 
-            // Wait for the video connection to become active
+            // Wait for video connection to become active
             AVCaptureConnection *conn = [self.movieOutput connectionWithMediaType:AVMediaTypeVideo];
-            int waitCycles = 0;
-            while ((!conn || !conn.isActive) && waitCycles < 10) {
+            int wait = 0;
+            while ((!conn || !conn.isActive) && wait < 10) {
                 [NSThread sleepForTimeInterval:0.1];
                 conn = [self.movieOutput connectionWithMediaType:AVMediaTypeVideo];
-                waitCycles++;
+                wait++;
             }
-            SneakyLog(@"Connection status after %dms: active=%d, enabled=%d", waitCycles * 100, conn.isActive, conn.isEnabled);
+            SneakyLog(@"Video connection active after %dms: %d", wait * 100, conn.isActive);
 
             NSString *dir = @"/var/mobile/Documents/SneakyCam";
             [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
@@ -233,7 +249,7 @@ static NSDictionary *getPreferences() {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self.movieOutput startRecordingToOutputFileURL:fileURL recordingDelegate:self];
                 self.isRecording = YES;
-                SneakyLog(@"startRecording dispatched to: %@", fileURL.path);
+                SneakyLog(@"Recording output dispatched: %@", fileURL.path);
 
                 NSDictionary *prefs = getPreferences();
                 if (prefs[@"ShowIndicatorDot"] ? [prefs[@"ShowIndicatorDot"] boolValue] : YES) {
@@ -244,11 +260,11 @@ static NSDictionary *getPreferences() {
     }
 }
 
-// Delegate: Video recording finished
+// Delegate: Video Finished
 - (void)captureOutput:(AVCaptureFileOutput *)output didFinishRecordingToOutputFileAtURL:(NSURL *)outputFileURL fromConnections:(NSArray<AVCaptureConnection *> *)connections error:(NSError *)error {
-    SneakyLog(@"captureOutput delegate called for: %@", outputFileURL.path);
+    SneakyLog(@"captureOutput delegate finished for URL: %@", outputFileURL.path);
     if (error) {
-        SneakyLog(@"Recording finished with error: %@ (Code: %ld)", error.localizedDescription, (long)error.code);
+        SneakyLog(@"Video Error: %@ (Code: %ld)", error.localizedDescription, (long)error.code);
     }
 
     BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:outputFileURL.path];
@@ -258,58 +274,58 @@ static NSDictionary *getPreferences() {
     if (exists && size > 0) {
         NSDictionary *prefs = getPreferences();
         NSInteger saveLocation = prefs[@"SaveLocation"] ? [prefs[@"SaveLocation"] integerValue] : 0;
-        if (saveLocation == 0) {
-            if (UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(outputFileURL.path)) {
-                UISaveVideoAtPathToSavedPhotosAlbum(outputFileURL.path, self, @selector(video:didFinishSavingWithError:contextInfo:), nil);
-            }
+        if (saveLocation == 0 && UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(outputFileURL.path)) {
+            UISaveVideoAtPathToSavedPhotosAlbum(outputFileURL.path, nil, nil, nil);
+            SneakyLog(@"Video saved to Camera Roll.");
         }
     }
 
     dispatch_async(self.sessionQueue, ^{
         if (self.session.isRunning) {
             [self.session stopRunning];
-            SneakyLog(@"Camera session stopped.");
+            SneakyLog(@"Video session stopped.");
         }
     });
 }
 
-- (void)video:(NSString *)videoPath didFinishSavingWithError:(NSError *)error contextInfo:(void *)contextInfo {
-    if (error) {
-        SneakyLog(@"Photos album export error: %@", error.localizedDescription);
-    } else {
-        SneakyLog(@"Video saved to Photos Camera Roll.");
-    }
-}
-
-// Delegate: Photo finished
+// Delegate: Photo Finished
 - (void)captureOutput:(AVCapturePhotoOutput *)output didFinishProcessingPhoto:(AVCapturePhoto *)photo error:(NSError *)error {
     if (error) {
-        SneakyLog(@"Photo error: %@", error.localizedDescription);
+        SneakyLog(@"Photo Error: %@ (Code: %ld)", error.localizedDescription, (long)error.code);
         return;
     }
 
     NSData *data = [photo fileDataRepresentation];
+    if (!data) {
+        SneakyLog(@"ERROR: Photo data is nil.");
+        return;
+    }
+
     UIImage *image = [UIImage imageWithData:data];
-    if (!image) return;
-
-    NSDictionary *prefs = getPreferences();
-    NSInteger saveLocation = prefs[@"SaveLocation"] ? [prefs[@"SaveLocation"] integerValue] : 0;
-
     NSString *dir = @"/var/mobile/Documents/SneakyCam";
     [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *dest = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"SneakyCam_%ld.jpg", (long)[[NSDate date] timeIntervalSince1970]]];
     [data writeToFile:dest atomically:YES];
-    SneakyLog(@"Photo saved: %@", dest);
+    SneakyLog(@"Photo saved successfully to disk: %@", dest);
 
-    if (saveLocation == 0) {
+    NSDictionary *prefs = getPreferences();
+    NSInteger saveLocation = prefs[@"SaveLocation"] ? [prefs[@"SaveLocation"] integerValue] : 0;
+    if (saveLocation == 0 && image) {
         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
         SneakyLog(@"Photo exported to Photos Camera Roll.");
     }
+
+    dispatch_async(self.sessionQueue, ^{
+        if (self.session.isRunning) {
+            [self.session stopRunning];
+            SneakyLog(@"Photo session stopped.");
+        }
+    });
 }
 
 @end
 
-// Hook Volume Buttons in SpringBoard
+// Hook Volume Buttons
 %hook SBVolumeControl
 
 - (void)handleVolumeButtonWithType:(long long)type down:(BOOL)down {
