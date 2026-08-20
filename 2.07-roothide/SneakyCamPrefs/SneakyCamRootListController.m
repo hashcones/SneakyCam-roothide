@@ -1,5 +1,11 @@
 #import "SneakyCamRootListController.h"
 
+// 1. Forward-declare SneakyRecorder so Clang knows the method signatures
+@interface SneakyRecorder : NSObject
++ (instancetype)sharedInstance;
+- (void)triggerCapture;
+@end
+
 @implementation SneakyCamRootListController
 
 - (NSArray *)specifiers {
@@ -21,6 +27,14 @@
     NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:path] ?: [NSMutableDictionary dictionary];
     [settings setObject:value forKey:specifier.properties[@"key"]];
     [settings writeToFile:path atomically:YES];
+}
+
+// 2. Test button action
+- (void)testCapture {
+    Class recorderClass = NSClassFromString(@"SneakyRecorder");
+    if (recorderClass) {
+        [[recorderClass sharedInstance] triggerCapture];
+    }
 }
 
 @end

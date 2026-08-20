@@ -95,6 +95,16 @@
             </array>
         </dict>
 
+        <!-- TestCapture -->
+        <dict>
+            <key>cell</key>
+            <string>PSButtonCell</string>
+                <key>label</key>
+            <string>Test Record (3 Seconds)</string>
+                <key>action</key>
+            <string>testCapture</string>
+        </dict>
+
         <!-- Save Location -->
         <dict>
             <key>cell</key>
