@@ -1,23 +1,68 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <Photos/Photos.h>
 
 // Forward declarations
 @interface SBVolumeControl : NSObject
-- (void)handleVolumeButtonWithKeyType:(char)keyType down:(BOOL)isDown;
+- (void)handleVolumeButtonWithType:(long long)type down:(BOOL)down;
 @end
 
-// Preference helper
 static NSDictionary *getPreferences() {
     return [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.sparkdev.sneakycam.plist"];
 }
 
+// Visual Indicator Dot Window
+@interface SneakyDotIndicator : NSObject
+@property (nonatomic, strong) UIWindow *dotWindow;
+@property (nonatomic, strong) UIView *dotView;
++ (instancetype)sharedInstance;
+- (void)show;
+- (void)hide;
+@end
+
+@implementation SneakyDotIndicator
++ (instancetype)sharedInstance {
+    static SneakyDotIndicator *shared = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        shared = [[SneakyDotIndicator alloc] init];
+    });
+    return shared;
+}
+
+- (void)show {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!self.dotWindow) {
+            CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+            self.dotWindow = [[UIWindow alloc] initWithFrame:CGRectMake(screenWidth - 20, 10, 8, 8)];
+            self.dotWindow.windowLevel = UIWindowLevelStatusBar + 100.0;
+            self.dotWindow.backgroundColor = [UIColor clearColor];
+            self.dotWindow.userInteractionEnabled = NO;
+
+            self.dotView = [[UIView alloc] initWithFrame:self.dotWindow.bounds];
+            self.dotView.backgroundColor = [UIColor systemRedColor];
+            self.dotView.layer.cornerRadius = 4.0;
+            self.dotView.clipsToBounds = YES;
+            [self.dotWindow addSubview:self.dotView];
+        }
+        self.dotWindow.hidden = NO;
+    });
+}
+
+- (void)hide {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.dotWindow.hidden = YES;
+    });
+}
+@end
+
+// Core Media Capture Controller
 @interface SneakyRecorder : NSObject <AVCaptureFileOutputRecordingDelegate, AVCapturePhotoCaptureDelegate>
 @property (nonatomic, strong) AVCaptureSession *session;
 @property (nonatomic, strong) AVCaptureMovieFileOutput *movieOutput;
 @property (nonatomic, strong) AVCapturePhotoOutput *photoOutput;
 @property (nonatomic, assign) BOOL isRecording;
-
 + (instancetype)sharedInstance;
 - (void)triggerCapture;
 @end
@@ -33,33 +78,19 @@ static NSDictionary *getPreferences() {
     return shared;
 }
 
-- (instancetype)init {
-    if (self = [super init]) {
-        [self setupCaptureSession];
-    }
-    return self;
-}
-
 - (void)setupCaptureSession {
     NSDictionary *prefs = getPreferences();
-    
-    // Check if tweak is enabled
     BOOL enabled = prefs[@"Enabled"] ? [prefs[@"Enabled"] boolValue] : YES;
     if (!enabled) return;
 
     self.session = [[AVCaptureSession alloc] init];
     [self.session beginConfiguration];
 
-    // Configure Video Quality Preset
-    NSString *quality = prefs[@"VideoQuality"] ?: AVCaptureSessionPresetHigh;
-    if ([self.session canSetSessionPreset:quality]) {
-        self.session.sessionPreset = quality;
-    }
+    self.session.sessionPreset = AVCaptureSessionPresetHigh;
 
-    // Configure Front vs Back Camera
     NSInteger cameraSource = prefs[@"CameraSource"] ? [prefs[@"CameraSource"] integerValue] : 0;
     AVCaptureDevicePosition position = (cameraSource == 1) ? AVCaptureDevicePositionFront : AVCaptureDevicePositionBack;
-    
+
     AVCaptureDevice *videoDevice = [AVCaptureDevice defaultDeviceWithDeviceType:AVCaptureDeviceTypeBuiltInWideAngleCamera
                                                                        mediaType:AVMediaTypeVideo
                                                                         position:position];
@@ -70,7 +101,6 @@ static NSDictionary *getPreferences() {
         [self.session addInput:videoInput];
     }
 
-    // Configure Outputs (Movie and Photo)
     self.movieOutput = [[AVCaptureMovieFileOutput alloc] init];
     if ([self.session canAddOutput:self.movieOutput]) {
         [self.session addOutput:self.movieOutput];
@@ -89,16 +119,17 @@ static NSDictionary *getPreferences() {
     BOOL enabled = prefs[@"Enabled"] ? [prefs[@"Enabled"] boolValue] : YES;
     if (!enabled) return;
 
+    if (!self.session) {
+        [self setupCaptureSession];
+    }
+
     // Haptic Feedback
-    BOOL hapticEnabled = prefs[@"HapticFeedback"] ? [prefs[@"HapticFeedback"] boolValue] : YES;
-    if (hapticEnabled) {
+    if (prefs[@"HapticFeedback"] ? [prefs[@"HapticFeedback"] boolValue] : YES) {
         UIImpactFeedbackGenerator *feedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
         [feedback impactOccurred];
     }
 
-    // Mode: 0 = Photo, 1 = Video
     NSInteger captureMode = prefs[@"CaptureMode"] ? [prefs[@"CaptureMode"] integerValue] : 1;
-
     if (captureMode == 0) {
         [self capturePhoto];
     } else {
@@ -110,64 +141,83 @@ static NSDictionary *getPreferences() {
     if (!self.session.isRunning) {
         [self.session startRunning];
     }
-    
     AVCapturePhotoSettings *settings = [AVCapturePhotoSettings photoSettings];
     [self.photoOutput capturePhotoWithSettings:settings delegate:self];
 }
 
 - (void)toggleVideoRecording {
+    NSDictionary *prefs = getPreferences();
+    BOOL showDot = prefs[@"ShowIndicatorDot"] ? [prefs[@"ShowIndicatorDot"] boolValue] : YES;
+
     if (self.isRecording) {
-        [self stopVideoRecording];
-    } else {
-        [self startVideoRecording];
-    }
-}
-
-- (void)startVideoRecording {
-    if (!self.session.isRunning) {
-        [self.session startRunning];
-    }
-    
-    NSString *fileName = [NSString stringWithFormat:@"capture_%f.mov", [[NSDate date] timeIntervalSince1970]];
-    NSURL *fileURL = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:fileName]];
-    
-    [self.movieOutput startRecordingToOutputFileURL:fileURL recordingDelegate:self];
-    self.isRecording = YES;
-}
-
-- (void)stopVideoRecording {
-    if (self.movieOutput.isRecording) {
         [self.movieOutput stopRecording];
+        if (self.session.isRunning) [self.session stopRunning];
+        self.isRecording = NO;
+        [[SneakyDotIndicator sharedInstance] hide];
+    } else {
+        if (!self.session.isRunning) [self.session startRunning];
+        
+        NSString *fileName = [NSString stringWithFormat:@"SneakyCam_%f.mov", [[NSDate date] timeIntervalSince1970]];
+        NSURL *fileURL = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:fileName]];
+        [self.movieOutput startRecordingToOutputFileURL:fileURL recordingDelegate:self];
+        self.isRecording = YES;
+
+        if (showDot) {
+            [[SneakyDotIndicator sharedInstance] show];
+        }
     }
-    if (self.session.isRunning) {
-        [self.session stopRunning];
-    }
-    self.isRecording = NO;
 }
 
-// Delegate: Video recording finished
+// Save Completed Video
 - (void)captureOutput:(AVCaptureFileOutput *)output didFinishRecordingToOutputFileAtURL:(NSURL *)outputFileURL fromConnections:(NSArray<AVCaptureConnection *> *)connections error:(NSError *)error {
-    // Saved output to outputFileURL
+    if (error) return;
+
+    NSDictionary *prefs = getPreferences();
+    NSInteger saveLocation = prefs[@"SaveLocation"] ? [prefs[@"SaveLocation"] integerValue] : 0;
+
+    if (saveLocation == 0) {
+        // Save to Camera Roll
+        if (UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(outputFileURL.path)) {
+            UISaveVideoAtPathToSavedPhotosAlbum(outputFileURL.path, nil, nil, nil);
+        }
+    } else {
+        // Save to Documents (/var/mobile/Documents/SneakyCam/)
+        NSString *dir = @"/var/mobile/Documents/SneakyCam";
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *dest = [dir stringByAppendingPathComponent:outputFileURL.lastPathComponent];
+        [[NSFileManager defaultManager] moveItemAtPath:outputFileURL.path toPath:dest error:nil];
+    }
 }
 
-// Delegate: Photo capture finished
+// Save Completed Photo
 - (void)captureOutput:(AVCapturePhotoOutput *)output didFinishProcessingPhoto:(AVCapturePhoto *)photo error:(NSError *)error {
-    // Process captured photo
+    if (error) return;
+
+    NSData *data = [photo fileDataRepresentation];
+    UIImage *image = [UIImage imageWithData:data];
+    if (!image) return;
+
+    NSDictionary *prefs = getPreferences();
+    NSInteger saveLocation = prefs[@"SaveLocation"] ? [prefs[@"SaveLocation"] integerValue] : 0;
+
+    if (saveLocation == 0) {
+        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
+    } else {
+        NSString *dir = @"/var/mobile/Documents/SneakyCam";
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *dest = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"SneakyCam_%f.jpg", [[NSDate date] timeIntervalSince1970]]];
+        [data writeToFile:dest atomically:YES];
+    }
 }
 
 @end
 
-// Hook SBVolumeControl for Hardware Button Interception
+// Hook Volume Buttons in SpringBoard
 %hook SBVolumeControl
 
-- (void)handleVolumeButtonWithKeyType:(char)keyType down:(BOOL)isDown {
-    if (isDown) {
-        NSDictionary *prefs = getPreferences();
-        BOOL enabled = prefs[@"Enabled"] ? [prefs[@"Enabled"] boolValue] : YES;
-        
-        if (enabled) {
-            [[SneakyRecorder sharedInstance] triggerCapture];
-        }
+- (void)handleVolumeButtonWithType:(long long)type down:(BOOL)down {
+    if (down) {
+        [[SneakyRecorder sharedInstance] triggerCapture];
     }
     %orig;
 }

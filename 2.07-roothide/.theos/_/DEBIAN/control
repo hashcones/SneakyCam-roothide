@@ -4,6 +4,6 @@ Depends: mobilesubstrate, preferenceloader (>= 2.2.4)
 Description: Background media capture tweak for iOS 15+
 Maintainer: hashcones
 Section: Tweaks
-Architecture: iphoneos-arm64
+Architecture: iphoneos-arm64e
 Version: 2.0.7
-Installed-Size: 184
+Installed-Size: 380

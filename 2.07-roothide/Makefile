@@ -1,20 +1,14 @@
-THEOS_PACKAGE_SCHEME = rootless
+THEOS_PACKAGE_SCHEME = roothide
 TARGET := iphone:clang:latest:15.0
-
-# 1. Compile clean 64-bit binary (prevents Exec format error)
-ARCHS = arm64
-
-# 2. Label the Debian package for Sileo / RootHide compatibility
-THEOS_PACKAGE_ARCH = iphoneos-arm64e
+ARCHS = arm64 arm64e
 
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = SneakyCam
 
 SneakyCam_FILES = Tweak.x
-SneakyCam_CFLAGS = -fobjc-arc -target arm64-apple-ios15.0 -miphoneos-version-min=15.0
-SneakyCam_LDFLAGS = -target arm64-apple-ios15.0 -miphoneos-version-min=15.0
-SneakyCam_FRAMEWORKS = UIKit AVFoundation CoreMedia
+SneakyCam_CFLAGS = -fobjc-arc
+SneakyCam_FRAMEWORKS = UIKit AVFoundation CoreMedia Photos AudioToolbox
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 SUBPROJECTS += SneakyCamPrefs

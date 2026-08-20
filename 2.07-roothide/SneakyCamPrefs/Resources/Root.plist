@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.plist">
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>items</key>
     <array>
-        <!-- General Settings Group -->
         <dict>
             <key>cell</key>
             <string>PSGroupCell</string>
@@ -33,10 +32,22 @@
             <key>key</key>
             <string>HapticFeedback</string>
             <key>label</key>
-            <string>Haptic Feedback on Start/Stop</string>
+            <string>Haptic Feedback</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.sparkdev.sneakycam</string>
+            <key>key</key>
+            <string>ShowIndicatorDot</string>
+            <key>label</key>
+            <string>Show Status Bar Recording Dot</string>
         </dict>
 
-        <!-- Capture Options Group -->
+        <!-- Capture & Quality -->
         <dict>
             <key>cell</key>
             <string>PSGroupCell</string>
@@ -84,41 +95,35 @@
             </array>
         </dict>
 
-        <!-- Video Quality Settings -->
+        <!-- Save Location -->
         <dict>
             <key>cell</key>
             <string>PSGroupCell</string>
             <key>label</key>
-            <string>Video Quality</string>
+            <string>Save Location</string>
         </dict>
         <dict>
             <key>cell</key>
-            <string>PSLinkListCell</string>
+            <string>PSSegmentCell</string>
             <key>default</key>
-            <string>AVCaptureSessionPresetHigh</string>
+            <integer>0</integer>
             <key>defaults</key>
             <string>com.sparkdev.sneakycam</string>
-            <key>detail</key>
-            <string>PSListItemsController</string>
             <key>key</key>
-            <string>VideoQuality</string>
-            <key>label</key>
-            <string>Quality</string>
+            <string>SaveLocation</string>
             <key>validTitles</key>
             <array>
-                <string>High (1080p)</string>
-                <string>Medium (720p)</string>
-                <string>Low (480p)</string>
+                <string>Camera Roll (Photos)</string>
+                <string>Documents Folder</string>
             </array>
             <key>validValues</key>
             <array>
-                <string>AVCaptureSessionPresetHigh</string>
-                <string>AVCaptureSessionPresetMedium</string>
-                <string>AVCaptureSessionPresetLow</string>
+                <integer>0</integer>
+                <integer>1</integer>
             </array>
         </dict>
     </array>
     <key>title</key>
-    <string>SneakyCam Settings</string>
+    <string>SneakyCam</string>
 </dict>
 </plist>
