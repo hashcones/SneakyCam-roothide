@@ -3,10 +3,16 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <Photos/Photos.h>
 
+// Forward declarations
 @interface SBVolumeControl : NSObject
 - (void)handleVolumeButtonWithType:(long long)type down:(BOOL)down;
 @end
 
+@interface FigCaptureClientSessionMonitor : NSObject
+- (void)_updateClientStateCondition:(id)condition newValue:(id)newValue;
+@end
+
+// Live On-Device Logger (/var/mobile/Documents/sneakycam.log)
 static void SneakyLog(NSString *format, ...) {
     va_list args;
     va_start(args, format);
@@ -33,13 +39,11 @@ static NSDictionary *getPreferences() {
     return [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.sparkdev.sneakycam.plist"];
 }
 
-// Full-Screen Transparent Window (Bypasses Reason 1 Interruption)
+// Indicator Dot Window
 @interface SneakyDotIndicator : NSObject
 @property (nonatomic, strong) UIWindow *dotWindow;
 @property (nonatomic, strong) UIView *dotView;
-@property (nonatomic, strong) AVCaptureVideoPreviewLayer *previewLayer;
 + (instancetype)sharedInstance;
-- (void)attachSession:(AVCaptureSession *)session;
 - (void)show;
 - (void)hide;
 @end
@@ -57,50 +61,33 @@ static NSDictionary *getPreferences() {
 - (instancetype)init {
     if (self = [super init]) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            CGRect screenBounds = [UIScreen mainScreen].bounds;
-            self.dotWindow = [[UIWindow alloc] initWithFrame:screenBounds];
+            CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+            self.dotWindow = [[UIWindow alloc] initWithFrame:CGRectMake(screenWidth - 24, 12, 10, 10)];
             self.dotWindow.windowLevel = UIWindowLevelStatusBar + 100.0;
             self.dotWindow.backgroundColor = [UIColor clearColor];
             self.dotWindow.userInteractionEnabled = NO;
 
-            // Indicator red dot view (top right corner)
-            self.dotView = [[UIView alloc] initWithFrame:CGRectMake(screenBounds.size.width - 24, 12, 10, 10)];
+            self.dotView = [[UIView alloc] initWithFrame:self.dotWindow.bounds];
             self.dotView.backgroundColor = [UIColor systemRedColor];
             self.dotView.layer.cornerRadius = 5.0;
             self.dotView.clipsToBounds = YES;
-            self.dotView.hidden = YES;
             [self.dotWindow addSubview:self.dotView];
 
-            // Keep window active on the render server
-            self.dotWindow.hidden = NO;
+            self.dotWindow.hidden = YES;
         });
     }
     return self;
 }
 
-- (void)attachSession:(AVCaptureSession *)session {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.previewLayer) {
-            [self.previewLayer removeFromSuperlayer];
-        }
-        self.previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:session];
-        self.previewLayer.frame = [UIScreen mainScreen].bounds;
-        self.previewLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
-        self.previewLayer.opacity = 0.001; // Completely invisible to user, visible to render server
-        [self.dotWindow.layer insertSublayer:self.previewLayer atIndex:0];
-        SneakyLog(@"Attached full-screen preview layer (bypasses Reason 1).");
-    });
-}
-
 - (void)show {
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.dotView.hidden = NO;
+        self.dotWindow.hidden = NO;
     });
 }
 
 - (void)hide {
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.dotView.hidden = YES;
+        self.dotWindow.hidden = YES;
     });
 }
 @end
@@ -141,10 +128,8 @@ static NSDictionary *getPreferences() {
 - (instancetype)init {
     if (self = [super init]) {
         self.sessionQueue = dispatch_queue_create("com.sparkdev.sneakycam.sessionQueue", DISPATCH_QUEUE_SERIAL);
-        
         dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
         self.videoQueue = dispatch_queue_create("com.sparkdev.sneakycam.videoQueue", qos);
-        
         self.currentMode = -1;
         [self registerSessionNotifications];
     }
@@ -155,7 +140,7 @@ static NSDictionary *getPreferences() {
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     [nc addObserverForName:AVCaptureSessionWasInterruptedNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
         NSInteger reason = [note.userInfo[AVCaptureSessionInterruptionReasonKey] integerValue];
-        SneakyLog(@"WARNING: AVCaptureSession was interrupted (Reason: %ld)", (long)reason);
+        SneakyLog(@"WARNING: AVCaptureSession interrupted (Reason: %ld)", (long)reason);
     }];
 
     [nc addObserverForName:AVCaptureSessionInterruptionEndedNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
@@ -171,7 +156,6 @@ static NSDictionary *getPreferences() {
 - (void)configureSessionForMode:(NSInteger)mode {
     if (!self.session) {
         self.session = [[AVCaptureSession alloc] init];
-        [[SneakyDotIndicator sharedInstance] attachSession:self.session];
     }
 
     [self.session beginConfiguration];
@@ -388,17 +372,10 @@ static NSDictionary *getPreferences() {
             NSError *err = nil;
             self.assetWriter = [AVAssetWriter assetWriterWithURL:self.currentOutputURL fileType:AVFileTypeMPEG4 error:&err];
 
-            NSDictionary *colorProperties = @{
-                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
-                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
-                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
-            };
-
             NSDictionary *outputSettings = @{
                 AVVideoCodecKey: AVVideoCodecTypeH264,
                 AVVideoWidthKey: @(self.videoWidth > 0 ? self.videoWidth : 1920),
-                AVVideoHeightKey: @(self.videoHeight > 0 ? self.videoHeight : 1080),
-                AVVideoColorPropertiesKey: colorProperties
+                AVVideoHeightKey: @(self.videoHeight > 0 ? self.videoHeight : 1080)
             };
 
             self.assetWriterInput = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeVideo outputSettings:outputSettings];
@@ -498,7 +475,26 @@ static NSDictionary *getPreferences() {
 
 @end
 
-// Hook Volume Buttons
+// ==========================================
+// GROUP 1: Mediaserverd Hooks (com.apple.celestial)
+// ==========================================
+%group MediaserverdHooks
+
+%hook FigCaptureClientSessionMonitor
+
+- (void)_updateClientStateCondition:(id)condition newValue:(id)newValue {
+    %orig(condition, @NO);
+}
+
+%end
+
+%end
+
+// ==========================================
+// GROUP 2: SpringBoard Hooks (com.apple.springboard)
+// ==========================================
+%group SpringBoardHooks
+
 %hook SBVolumeControl
 
 - (void)handleVolumeButtonWithType:(long long)type down:(BOOL)down {
@@ -509,3 +505,21 @@ static NSDictionary *getPreferences() {
 }
 
 %end
+
+%end
+
+// ==========================================
+// CONSTRUCTOR: Process Routing
+// ==========================================
+%ctor {
+    NSString *processName = [[NSProcessInfo processInfo] processName];
+    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+
+    if ([bundleID isEqualToString:@"com.apple.springboard"] || [processName isEqualToString:@"SpringBoard"]) {
+        %init(SpringBoardHooks);
+        NSLog(@"[SneakyCam] Initialized in SpringBoard.");
+    } else {
+        %init(MediaserverdHooks);
+        NSLog(@"[SneakyCam] Initialized in mediaserverd.");
+    }
+}
