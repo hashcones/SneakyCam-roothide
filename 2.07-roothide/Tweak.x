@@ -7,7 +7,6 @@
 - (void)handleVolumeButtonWithType:(long long)type down:(BOOL)down;
 @end
 
-// Live On-Device Logger (/var/mobile/Documents/sneakycam.log)
 static void SneakyLog(NSString *format, ...) {
     va_list args;
     va_start(args, format);
@@ -34,7 +33,7 @@ static NSDictionary *getPreferences() {
     return [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.sparkdev.sneakycam.plist"];
 }
 
-// Indicator Dot Window + Frame Pipeline Activator
+// Indicator Dot Window
 @interface SneakyDotIndicator : NSObject
 @property (nonatomic, strong) UIWindow *dotWindow;
 @property (nonatomic, strong) UIView *dotView;
@@ -87,7 +86,7 @@ static NSDictionary *getPreferences() {
 }
 @end
 
-// Core Media Capture Engine
+// Core Media Capture Controller
 @interface SneakyRecorder : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate>
 @property (nonatomic, strong) AVCaptureSession *session;
 @property (nonatomic, strong) AVCaptureVideoDataOutput *videoDataOutput;
@@ -123,10 +122,27 @@ static NSDictionary *getPreferences() {
 - (instancetype)init {
     if (self = [super init]) {
         self.sessionQueue = dispatch_queue_create("com.sparkdev.sneakycam.sessionQueue", DISPATCH_QUEUE_SERIAL);
-        self.videoQueue = dispatch_queue_create("com.sparkdev.sneakycam.videoQueue", DISPATCH_QUEUE_SERIAL);
+        
+        dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
+        self.videoQueue = dispatch_queue_create("com.sparkdev.sneakycam.videoQueue", qos);
+        
         self.currentMode = -1;
+        [self registerSessionNotifications];
     }
     return self;
+}
+
+- (void)registerSessionNotifications {
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc addObserverForName:AVCaptureSessionWasInterruptedNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        NSInteger reason = [note.userInfo[AVCaptureSessionInterruptionReasonKey] integerValue];
+        SneakyLog(@"WARNING: AVCaptureSession was interrupted (Reason: %ld)", (long)reason);
+    }];
+
+    [nc addObserverForName:AVCaptureSessionRuntimeErrorNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        NSError *error = note.userInfo[AVCaptureSessionErrorKey];
+        SneakyLog(@"ERROR: AVCaptureSession runtime error: %@", error.localizedDescription);
+    }];
 }
 
 - (void)configureSessionForMode:(NSInteger)mode {
@@ -136,7 +152,13 @@ static NSDictionary *getPreferences() {
 
     [self.session beginConfiguration];
 
-    // Remove existing inputs/outputs
+    // 1. Enable Wide Color Gamut (P3) if supported
+    if (@available(iOS 10.0, *)) {
+        if ([self.session respondsToSelector:@selector(setAutomaticallyConfiguresCaptureDeviceForWideColor:)]) {
+            self.session.automaticallyConfiguresCaptureDeviceForWideColor = YES;
+        }
+    }
+
     for (AVCaptureInput *input in [self.session.inputs copy]) {
         [self.session removeInput:input];
     }
@@ -148,7 +170,6 @@ static NSDictionary *getPreferences() {
     NSInteger cameraSource = prefs[@"CameraSource"] ? [prefs[@"CameraSource"] integerValue] : 0;
     AVCaptureDevicePosition position = (cameraSource == 1) ? AVCaptureDevicePositionFront : AVCaptureDevicePositionBack;
 
-    // Attach Camera Device
     AVCaptureDevice *videoDevice = nil;
     if (@available(iOS 10.0, *)) {
         AVCaptureDeviceDiscoverySession *discovery = [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:@[AVCaptureDeviceTypeBuiltInWideAngleCamera] mediaType:AVMediaTypeVideo position:position];
@@ -159,11 +180,44 @@ static NSDictionary *getPreferences() {
     }
 
     if (videoDevice) {
-        NSError *err = nil;
-        AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:videoDevice error:&err];
+        // 2. Configure Native Device Properties (Focus, Exposure, White Balance, Frame Rate)
+        NSError *lockErr = nil;
+        if ([videoDevice lockForConfiguration:&lockErr]) {
+            // Continuous Autofocus
+            if ([videoDevice isFocusModeSupported:AVCaptureFocusModeContinuousAutoFocus]) {
+                videoDevice.focusMode = AVCaptureFocusModeContinuousAutoFocus;
+            }
+            if ([videoDevice isSmoothAutoFocusSupported]) {
+                videoDevice.smoothAutoFocusEnabled = YES;
+            }
+
+            // Continuous Auto-Exposure
+            if ([videoDevice isExposureModeSupported:AVCaptureExposureModeContinuousAutoExposure]) {
+                videoDevice.exposureMode = AVCaptureExposureModeContinuousAutoExposure;
+            }
+
+            // Continuous Auto-White Balance
+            if ([videoDevice isWhiteBalanceModeSupported:AVCaptureWhiteBalanceModeContinuousAutoWhiteBalance]) {
+                videoDevice.whiteBalanceMode = AVCaptureWhiteBalanceModeContinuousAutoWhiteBalance;
+            }
+
+            // Low Light Boost
+            if ([videoDevice isLowLightBoostSupported]) {
+                videoDevice.automaticallyEnablesLowLightBoostWhenAvailable = YES;
+            }
+
+            // Lock Frame Rate to 30 FPS
+            videoDevice.activeVideoMinFrameDuration = CMTimeMake(1, 30);
+            videoDevice.activeVideoMaxFrameDuration = CMTimeMake(1, 30);
+
+            [videoDevice unlockForConfiguration];
+            SneakyLog(@"Configured 3A (AF/AE/AWB), 30fps lock, and Low Light Boost on: %@", videoDevice.localizedName);
+        }
+
+        NSError *inputErr = nil;
+        AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:videoDevice error:&inputErr];
         if (input && [self.session canAddInput:input]) {
             [self.session addInput:input];
-            SneakyLog(@"Camera attached: %@", videoDevice.localizedName);
         }
     }
 
@@ -173,12 +227,14 @@ static NSDictionary *getPreferences() {
             self.session.sessionPreset = AVCaptureSessionPresetPhoto;
         }
         self.photoOutput = [[AVCapturePhotoOutput alloc] init];
+        self.photoOutput.highResolutionCaptureEnabled = YES;
+
         if ([self.session canAddOutput:self.photoOutput]) {
             [self.session addOutput:self.photoOutput];
         }
-        SneakyLog(@"Configured for PHOTO mode.");
+        SneakyLog(@"Configured for PHOTO mode (High Res Enabled).");
     } else {
-        // VIDEO MODE (iPhone 7 4K / 1080p / 720p)
+        // VIDEO MODE (4K / 1080p / 720p)
         NSString *requestedPreset = prefs[@"VideoQuality"] ?: AVCaptureSessionPreset3840x2160;
 
         if (position == AVCaptureDevicePositionBack && [requestedPreset isEqualToString:AVCaptureSessionPreset3840x2160]) {
@@ -186,32 +242,47 @@ static NSDictionary *getPreferences() {
                 self.session.sessionPreset = AVCaptureSessionPreset3840x2160;
                 self.videoWidth = 3840;
                 self.videoHeight = 2160;
-                SneakyLog(@"Active Preset: 4K UHD (3840x2160 @ 30fps)");
+                SneakyLog(@"Preset: 4K UHD (3840x2160)");
             }
         } else if ([requestedPreset isEqualToString:AVCaptureSessionPreset1920x1080] || (position == AVCaptureDevicePositionFront && [requestedPreset isEqualToString:AVCaptureSessionPreset3840x2160])) {
             if ([self.session canSetSessionPreset:AVCaptureSessionPreset1920x1080]) {
                 self.session.sessionPreset = AVCaptureSessionPreset1920x1080;
                 self.videoWidth = 1920;
                 self.videoHeight = 1080;
-                SneakyLog(@"Active Preset: Full HD (1920x1080)");
+                SneakyLog(@"Preset: Full HD (1920x1080)");
             }
         } else {
             self.session.sessionPreset = AVCaptureSessionPreset1280x720;
             self.videoWidth = 1280;
             self.videoHeight = 720;
-            SneakyLog(@"Active Preset: HD (1280x720)");
+            SneakyLog(@"Preset: HD (1280x720)");
         }
 
         self.videoDataOutput = [[AVCaptureVideoDataOutput alloc] init];
         self.videoDataOutput.alwaysDiscardsLateVideoFrames = YES;
-        self.videoDataOutput.videoSettings = @{
-            (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)
-        };
+
+        NSNumber *nativeFormat = self.videoDataOutput.availableVideoCVPixelFormatTypes.firstObject;
+        if (nativeFormat) {
+            self.videoDataOutput.videoSettings = @{ (id)kCVPixelBufferPixelFormatTypeKey: nativeFormat };
+        }
+
         [self.videoDataOutput setSampleBufferDelegate:self queue:self.videoQueue];
 
         if ([self.session canAddOutput:self.videoDataOutput]) {
             [self.session addOutput:self.videoDataOutput];
-            SneakyLog(@"VideoDataOutput attached with BGRA format.");
+            
+            // 3. Configure Hardware Stabilization & Orientation
+            AVCaptureConnection *connection = [self.videoDataOutput connectionWithMediaType:AVMediaTypeVideo];
+            if (connection) {
+                if ([connection isVideoOrientationSupported]) {
+                    connection.videoOrientation = AVCaptureVideoOrientationPortrait;
+                }
+                if ([connection isVideoStabilizationSupported]) {
+                    connection.preferredVideoStabilizationMode = AVCaptureVideoStabilizationModeCinematic;
+                    SneakyLog(@"Cinematic Hardware Video Stabilization enabled.");
+                }
+                connection.enabled = YES;
+            }
         }
     }
 
@@ -249,8 +320,9 @@ static NSDictionary *getPreferences() {
         [NSThread sleepForTimeInterval:0.35];
 
         AVCapturePhotoSettings *settings = [AVCapturePhotoSettings photoSettings];
+        settings.highResolutionPhotoEnabled = YES;
         [self.photoOutput capturePhotoWithSettings:settings delegate:self];
-        SneakyLog(@"Photo capture dispatched.");
+        SneakyLog(@"High-Res Photo capture dispatched.");
     });
 }
 
@@ -276,13 +348,11 @@ static NSDictionary *getPreferences() {
                         NSInteger saveLocation = prefs[@"SaveLocation"] ? [prefs[@"SaveLocation"] integerValue] : 0;
 
                         if (saveLocation == 0) {
-                            // Save to Photos and clean up working file
                             SneakyLog(@"[Camera Roll Mode] Exporting video to Photos App...");
                             if (UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(self.currentOutputURL.path)) {
                                 UISaveVideoAtPathToSavedPhotosAlbum(self.currentOutputURL.path, self, @selector(video:didFinishSavingWithError:contextInfo:), nil);
                             }
                         } else {
-                            // Leave directly in Documents folder
                             SneakyLog(@"[Documents Mode] Video saved to: %@", self.currentOutputURL.path);
                         }
                     }
@@ -321,10 +391,18 @@ static NSDictionary *getPreferences() {
             NSError *err = nil;
             self.assetWriter = [AVAssetWriter assetWriterWithURL:self.currentOutputURL fileType:AVFileTypeMPEG4 error:&err];
 
+            // 4. Standard BT.709 Color Space & Encoder Compression Settings
+            NSDictionary *colorProperties = @{
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
+            };
+
             NSDictionary *outputSettings = @{
                 AVVideoCodecKey: AVVideoCodecTypeH264,
                 AVVideoWidthKey: @(self.videoWidth > 0 ? self.videoWidth : 1920),
-                AVVideoHeightKey: @(self.videoHeight > 0 ? self.videoHeight : 1080)
+                AVVideoHeightKey: @(self.videoHeight > 0 ? self.videoHeight : 1080),
+                AVVideoColorPropertiesKey: colorProperties
             };
 
             self.assetWriterInput = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeVideo outputSettings:outputSettings];
