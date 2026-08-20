@@ -4,6 +4,7 @@
 <dict>
     <key>items</key>
     <array>
+        <!-- General Settings Group -->
         <dict>
             <key>cell</key>
             <string>PSGroupCell</string>
@@ -47,7 +48,7 @@
             <string>Show Status Bar Recording Dot</string>
         </dict>
 
-        <!-- Capture & Quality -->
+        <!-- Capture Options Group -->
         <dict>
             <key>cell</key>
             <string>PSGroupCell</string>
@@ -95,14 +96,38 @@
             </array>
         </dict>
 
-        <!-- TestCapture -->
+        <!-- Video Quality Settings -->
         <dict>
             <key>cell</key>
-            <string>PSButtonCell</string>
-                <key>label</key>
-            <string>Test Record (3 Seconds)</string>
-                <key>action</key>
-            <string>testCapture</string>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>Video Quality</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSLinkListCell</string>
+            <key>default</key>
+            <string>AVCaptureSessionPreset3840x2160</string>
+            <key>defaults</key>
+            <string>com.sparkdev.sneakycam</string>
+            <key>detail</key>
+            <string>PSListItemsController</string>
+            <key>key</key>
+            <string>VideoQuality</string>
+            <key>label</key>
+            <string>Quality</string>
+            <key>validTitles</key>
+            <array>
+                <string>4K UHD (2160p @ 30fps)</string>
+                <string>Full HD (1080p @ 30fps)</string>
+                <string>HD (720p @ 30fps)</string>
+            </array>
+            <key>validValues</key>
+            <array>
+                <string>AVCaptureSessionPreset3840x2160</string>
+                <string>AVCaptureSessionPreset1920x1080</string>
+                <string>AVCaptureSessionPreset1280x720</string>
+            </array>
         </dict>
 
         <!-- Save Location -->
