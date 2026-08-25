@@ -1,0 +1,61 @@
+#!/bin/bash
+set -e
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <path_to_rootful_arm64.deb>"
+    exit 1
+fi
+
+INPUT_DEB="$1"
+BASE_NAME="$(basename "$INPUT_DEB" .deb)"
+WORK_DIR="work_roothide_$(date +%s)"
+OUTPUT_DEB="${BASE_NAME}_iphoneos-arm64e.deb"
+
+echo "[*] Unpacking rootful deb..."
+mkdir -p "$WORK_DIR/pkg"
+dpkg-deb -R "$INPUT_DEB" "$WORK_DIR/pkg"
+
+CONTROL_FILE="$WORK_DIR/pkg/DEBIAN/control"
+
+if [ ! -f "$CONTROL_FILE" ]; then
+    echo "[-] Error: DEBIAN/control file not found!"
+    rm -rf "$WORK_DIR"
+    exit 1
+fi
+
+echo "[*] Patching DEBIAN/control..."
+
+# 1. Update Architecture to iphoneos-arm64e
+if grep -qi "^Architecture:" "$CONTROL_FILE"; then
+    sed -i 's/^Architecture:.*/Architecture: iphoneos-arm64e/I' "$CONTROL_FILE"
+else
+    echo "Architecture: iphoneos-arm64e" >> "$CONTROL_FILE"
+fi
+
+# 2. Append ~roothide to Version if missing
+CURRENT_VERSION=$(grep -i "^Version:" "$CONTROL_FILE" | head -n 1 | awk '{print $2}')
+if [[ "$CURRENT_VERSION" != *"~roothide"* ]]; then
+    NEW_VERSION="${CURRENT_VERSION}~roothide"
+    sed -i "s/^Version:.*/Version: $NEW_VERSION/I" "$CONTROL_FILE"
+fi
+
+# 3. Update or add mobilesubstrate dependency
+if grep -qi "^Depends:" "$CONTROL_FILE"; then
+    # Ensure mobilesubstrate constraint is compatible
+    if grep -q "mobilesubstrate" "$CONTROL_FILE"; then
+        sed -i 's/mobilesubstrate *([^)]*)/mobilesubstrate (>= 0.9.5000)/g' "$CONTROL_FILE"
+    fi
+fi
+
+# 4. Clean up maintainer script permissions
+echo "[*] Setting permissions on DEBIAN scripts..."
+find "$WORK_DIR/pkg/DEBIAN" -type f ! -name "control" -exec chmod 755 {} +
+
+# 5. Build the final RootHide .deb package
+echo "[*] Repackaging deb for RootHide..."
+dpkg-deb -Zxz --root-owner-group -b "$WORK_DIR/pkg" "$OUTPUT_DEB"
+
+# Cleanup workspace
+rm -rf "$WORK_DIR"
+
+echo "[+] Successfully created RootHide package: $OUTPUT_DEB"
