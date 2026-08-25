@@ -1,525 +1,257 @@
+#import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
-#import <AudioToolbox/AudioToolbox.h>
 #import <Photos/Photos.h>
+#import <AudioToolbox/AudioServices.h>
 
-// Forward declarations
-@interface SBVolumeControl : NSObject
-- (void)handleVolumeButtonWithType:(long long)type down:(BOOL)down;
+// MARK: - Preference Identifiers
+static NSString *const kDomain = @"com.autt.sneakycamprefs";
+static NSString *const kPrefNotification = @"com.autt.sneakycamprefs/PreferencesChanged";
+
+static BOOL kEnabled = YES;
+static BOOL kShowStatusBarIndicator = NO;
+static NSInteger kCameraPosition = 0; // 0 = Back, 1 = Front
+
+static void loadPreferences(void) {
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kDomain);
+    
+    CFPropertyListRef valEnabled = CFPreferencesCopyAppValue((__bridge CFStringRef)@"enabled", (__bridge CFStringRef)kDomain);
+    kEnabled = valEnabled ? [(__bridge id)valEnabled boolValue] : YES;
+    if (valEnabled) CFRelease(valEnabled);
+
+    CFPropertyListRef valIndicator = CFPreferencesCopyAppValue((__bridge CFStringRef)@"showStatusBarIndicator", (__bridge CFStringRef)kDomain);
+    kShowStatusBarIndicator = valIndicator ? [(__bridge id)valIndicator boolValue] : NO;
+    if (valIndicator) CFRelease(valIndicator);
+
+    CFPropertyListRef valCamPos = CFPreferencesCopyAppValue((__bridge CFStringRef)@"cameraPosition", (__bridge CFStringRef)kDomain);
+    kCameraPosition = valCamPos ? [(__bridge id)valCamPos integerValue] : 0;
+    if (valCamPos) CFRelease(valCamPos);
+}
+
+// MARK: - Status Bar Sensor Privacy Dot Suppression
+@interface _UIStatusBarSensorActivityView : UIView
 @end
 
-@interface FigCaptureClientSessionMonitor : NSObject
-- (void)_updateClientStateCondition:(id)condition newValue:(id)newValue;
+@interface _UIStatusBarSensorActivityItem : NSObject
 @end
 
-// Live On-Device Logger (/var/mobile/Documents/sneakycam.log)
-static void SneakyLog(NSString *format, ...) {
-    va_list args;
-    va_start(args, format);
-    NSString *msg = [[NSString alloc] initWithFormat:format arguments:args];
-    va_end(args);
-    NSLog(@"[SneakyCam] %@", msg);
+%hook _UIStatusBarSensorActivityView
 
-    NSString *logDir = @"/var/mobile/Documents";
-    [[NSFileManager defaultManager] createDirectoryAtPath:logDir withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString *logPath = [logDir stringByAppendingPathComponent:@"sneakycam.log"];
-    NSString *entry = [NSString stringWithFormat:@"[%@] %@\n", [NSDate date], msg];
-
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:logPath];
-    if (!handle) {
-        [entry writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+- (void)setHidden:(BOOL)hidden {
+    if (kEnabled && !kShowStatusBarIndicator) {
+        %orig(YES);
     } else {
-        [handle seekToEndOfFile];
-        [handle writeData:[entry dataUsingEncoding:NSUTF8StringEncoding]];
-        [handle closeFile];
+        %orig(hidden);
     }
 }
 
-static NSDictionary *getPreferences() {
-    return [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.sparkdev.sneakycam.plist"];
-}
-
-// Indicator Dot Window
-@interface SneakyDotIndicator : NSObject
-@property (nonatomic, strong) UIWindow *dotWindow;
-@property (nonatomic, strong) UIView *dotView;
-+ (instancetype)sharedInstance;
-- (void)show;
-- (void)hide;
-@end
-
-@implementation SneakyDotIndicator
-+ (instancetype)sharedInstance {
-    static SneakyDotIndicator *shared = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        shared = [[SneakyDotIndicator alloc] init];
-    });
-    return shared;
-}
-
-- (instancetype)init {
-    if (self = [super init]) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
-            self.dotWindow = [[UIWindow alloc] initWithFrame:CGRectMake(screenWidth - 24, 12, 10, 10)];
-            self.dotWindow.windowLevel = UIWindowLevelStatusBar + 100.0;
-            self.dotWindow.backgroundColor = [UIColor clearColor];
-            self.dotWindow.userInteractionEnabled = NO;
-
-            self.dotView = [[UIView alloc] initWithFrame:self.dotWindow.bounds];
-            self.dotView.backgroundColor = [UIColor systemRedColor];
-            self.dotView.layer.cornerRadius = 5.0;
-            self.dotView.clipsToBounds = YES;
-            [self.dotWindow addSubview:self.dotView];
-
-            self.dotWindow.hidden = YES;
-        });
+- (void)setAlpha:(CGFloat)alpha {
+    if (kEnabled && !kShowStatusBarIndicator) {
+        %orig(0.0);
+    } else {
+        %orig(alpha);
     }
-    return self;
 }
 
-- (void)show {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self.dotWindow.hidden = NO;
-    });
+- (void)layoutSubviews {
+    %orig;
+    if (kEnabled && !kShowStatusBarIndicator) {
+        self.hidden = YES;
+        self.alpha = 0.0;
+    }
 }
 
-- (void)hide {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self.dotWindow.hidden = YES;
-    });
-}
-@end
+%end
 
-// Core Media Capture Controller
-@interface SneakyRecorder : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate>
-@property (nonatomic, strong) AVCaptureSession *session;
-@property (nonatomic, strong) AVCaptureVideoDataOutput *videoDataOutput;
-@property (nonatomic, strong) AVCapturePhotoOutput *photoOutput;
-@property (nonatomic, strong) AVAssetWriter *assetWriter;
-@property (nonatomic, strong) AVAssetWriterInput *assetWriterInput;
+%hook _UIStatusBarSensorActivityItem
+
+- (id)applyUpdate:(id)arg1 toDisplayItem:(id)arg2 {
+    if (kEnabled && !kShowStatusBarIndicator) {
+        return nil;
+    }
+    return %orig(arg1, arg2);
+}
+
+%end
+
+// MARK: - Background Capture Manager
+@interface BackgroundRecorder : NSObject <AVCaptureFileOutputRecordingDelegate>
+@property (nonatomic, strong) AVCaptureSession *captureSession;
+@property (nonatomic, strong) AVCaptureMovieFileOutput *movieOutput;
 @property (nonatomic, strong) dispatch_queue_t sessionQueue;
-@property (nonatomic, strong) dispatch_queue_t videoQueue;
-@property (nonatomic, strong) NSURL *currentOutputURL;
-@property (nonatomic, assign) NSInteger videoWidth;
-@property (nonatomic, assign) NSInteger videoHeight;
-@property (nonatomic, assign) NSInteger currentMode;
 @property (nonatomic, assign) BOOL isRecording;
-@property (nonatomic, assign) BOOL shouldWriteFrames;
-@property (nonatomic, assign) BOOL isSessionStarted;
-@property (nonatomic, assign) NSInteger frameCount;
-
 + (instancetype)sharedInstance;
-- (void)triggerCapture;
+- (void)toggleRecording;
 @end
 
-@implementation SneakyRecorder
+@implementation BackgroundRecorder
 
 + (instancetype)sharedInstance {
-    static SneakyRecorder *shared = nil;
+    static BackgroundRecorder *instance = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        shared = [[SneakyRecorder alloc] init];
+        instance = [[BackgroundRecorder alloc] init];
     });
-    return shared;
+    return instance;
 }
 
 - (instancetype)init {
-    if (self = [super init]) {
-        self.sessionQueue = dispatch_queue_create("com.sparkdev.sneakycam.sessionQueue", DISPATCH_QUEUE_SERIAL);
-        dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
-        self.videoQueue = dispatch_queue_create("com.sparkdev.sneakycam.videoQueue", qos);
-        self.currentMode = -1;
-        [self registerSessionNotifications];
+    self = [super init];
+    if (self) {
+        _isRecording = NO;
+        _sessionQueue = dispatch_queue_create("com.autt.sneakycam.sessionQueue", DISPATCH_QUEUE_SERIAL);
     }
     return self;
 }
 
-- (void)registerSessionNotifications {
-    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
-    [nc addObserverForName:AVCaptureSessionWasInterruptedNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-        NSInteger reason = [note.userInfo[AVCaptureSessionInterruptionReasonKey] integerValue];
-        SneakyLog(@"WARNING: AVCaptureSession interrupted (Reason: %ld)", (long)reason);
-    }];
-
-    [nc addObserverForName:AVCaptureSessionInterruptionEndedNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-        SneakyLog(@"SUCCESS: AVCaptureSession interruption ended. Resuming frames.");
-    }];
-
-    [nc addObserverForName:AVCaptureSessionRuntimeErrorNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-        NSError *error = note.userInfo[AVCaptureSessionErrorKey];
-        SneakyLog(@"ERROR: AVCaptureSession runtime error: %@", error.localizedDescription);
-    }];
-}
-
-- (void)configureSessionForMode:(NSInteger)mode {
-    if (!self.session) {
-        self.session = [[AVCaptureSession alloc] init];
-    }
-
-    [self.session beginConfiguration];
-
-    for (AVCaptureInput *input in [self.session.inputs copy]) {
-        [self.session removeInput:input];
-    }
-    for (AVCaptureOutput *output in [self.session.outputs copy]) {
-        [self.session removeOutput:output];
-    }
-
-    NSDictionary *prefs = getPreferences();
-    NSInteger cameraSource = prefs[@"CameraSource"] ? [prefs[@"CameraSource"] integerValue] : 0;
-    AVCaptureDevicePosition position = (cameraSource == 1) ? AVCaptureDevicePositionFront : AVCaptureDevicePositionBack;
-
-    AVCaptureDevice *videoDevice = nil;
-    if (@available(iOS 10.0, *)) {
-        AVCaptureDeviceDiscoverySession *discovery = [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:@[AVCaptureDeviceTypeBuiltInWideAngleCamera] mediaType:AVMediaTypeVideo position:position];
-        videoDevice = discovery.devices.firstObject;
-    }
-    if (!videoDevice) {
-        videoDevice = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-    }
-
-    if (videoDevice) {
-        NSError *lockErr = nil;
-        if ([videoDevice lockForConfiguration:&lockErr]) {
-            if ([videoDevice isFocusModeSupported:AVCaptureFocusModeContinuousAutoFocus]) {
-                videoDevice.focusMode = AVCaptureFocusModeContinuousAutoFocus;
-            }
-            if ([videoDevice isExposureModeSupported:AVCaptureExposureModeContinuousAutoExposure]) {
-                videoDevice.exposureMode = AVCaptureExposureModeContinuousAutoExposure;
-            }
-            if ([videoDevice isWhiteBalanceModeSupported:AVCaptureWhiteBalanceModeContinuousAutoWhiteBalance]) {
-                videoDevice.whiteBalanceMode = AVCaptureWhiteBalanceModeContinuousAutoWhiteBalance;
-            }
-            videoDevice.activeVideoMinFrameDuration = CMTimeMake(1, 30);
-            videoDevice.activeVideoMaxFrameDuration = CMTimeMake(1, 30);
-            [videoDevice unlockForConfiguration];
-        }
-
-        NSError *inputErr = nil;
-        AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:videoDevice error:&inputErr];
-        if (input && [self.session canAddInput:input]) {
-            [self.session addInput:input];
-            SneakyLog(@"Attached camera: %@", videoDevice.localizedName);
-        }
-    }
-
-    if (mode == 0) {
-        // PHOTO MODE
-        if ([self.session canSetSessionPreset:AVCaptureSessionPresetPhoto]) {
-            self.session.sessionPreset = AVCaptureSessionPresetPhoto;
-        }
-        self.photoOutput = [[AVCapturePhotoOutput alloc] init];
-        self.photoOutput.highResolutionCaptureEnabled = YES;
-        if ([self.session canAddOutput:self.photoOutput]) {
-            [self.session addOutput:self.photoOutput];
-        }
-        SneakyLog(@"Configured for PHOTO mode.");
-    } else {
-        // VIDEO MODE (4K / 1080p / 720p)
-        NSString *requestedPreset = prefs[@"VideoQuality"] ?: AVCaptureSessionPreset3840x2160;
-
-        if (position == AVCaptureDevicePositionBack && [requestedPreset isEqualToString:AVCaptureSessionPreset3840x2160]) {
-            if ([self.session canSetSessionPreset:AVCaptureSessionPreset3840x2160]) {
-                self.session.sessionPreset = AVCaptureSessionPreset3840x2160;
-                self.videoWidth = 3840;
-                self.videoHeight = 2160;
-                SneakyLog(@"Preset: 4K UHD (3840x2160)");
-            }
-        } else if ([requestedPreset isEqualToString:AVCaptureSessionPreset1920x1080] || (position == AVCaptureDevicePositionFront && [requestedPreset isEqualToString:AVCaptureSessionPreset3840x2160])) {
-            if ([self.session canSetSessionPreset:AVCaptureSessionPreset1920x1080]) {
-                self.session.sessionPreset = AVCaptureSessionPreset1920x1080;
-                self.videoWidth = 1920;
-                self.videoHeight = 1080;
-                SneakyLog(@"Preset: Full HD (1920x1080)");
-            }
-        } else {
-            self.session.sessionPreset = AVCaptureSessionPreset1280x720;
-            self.videoWidth = 1280;
-            self.videoHeight = 720;
-            SneakyLog(@"Preset: HD (1280x720)");
-        }
-
-        self.videoDataOutput = [[AVCaptureVideoDataOutput alloc] init];
-        self.videoDataOutput.alwaysDiscardsLateVideoFrames = YES;
-
-        NSNumber *nativeFormat = self.videoDataOutput.availableVideoCVPixelFormatTypes.firstObject;
-        if (nativeFormat) {
-            self.videoDataOutput.videoSettings = @{ (id)kCVPixelBufferPixelFormatTypeKey: nativeFormat };
-        }
-
-        [self.videoDataOutput setSampleBufferDelegate:self queue:self.videoQueue];
-
-        if ([self.session canAddOutput:self.videoDataOutput]) {
-            [self.session addOutput:self.videoDataOutput];
-            
-            AVCaptureConnection *connection = [self.videoDataOutput connectionWithMediaType:AVMediaTypeVideo];
-            if (connection) {
-                if ([connection isVideoOrientationSupported]) {
-                    connection.videoOrientation = AVCaptureVideoOrientationPortrait;
-                }
-                if ([connection isVideoStabilizationSupported]) {
-                    connection.preferredVideoStabilizationMode = AVCaptureVideoStabilizationModeCinematic;
-                }
-                connection.enabled = YES;
-            }
-        }
-    }
-
-    [self.session commitConfiguration];
-    self.currentMode = mode;
-}
-
-- (void)triggerCapture {
-    NSDictionary *prefs = getPreferences();
-    BOOL enabled = prefs[@"Enabled"] ? [prefs[@"Enabled"] boolValue] : YES;
-    if (!enabled) return;
-
-    if (prefs[@"HapticFeedback"] ? [prefs[@"HapticFeedback"] boolValue] : YES) {
-        UIImpactFeedbackGenerator *feedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-        [feedback impactOccurred];
-    }
-
-    NSInteger captureMode = prefs[@"CaptureMode"] ? [prefs[@"CaptureMode"] integerValue] : 1;
-    if (captureMode == 0) {
-        [self capturePhoto];
-    } else {
-        [self toggleVideoRecording];
-    }
-}
-
-- (void)capturePhoto {
+- (void)setupSessionWithCompletion:(void(^)(BOOL success))completion {
     dispatch_async(self.sessionQueue, ^{
-        [self configureSessionForMode:0];
-
-        if (!self.session.isRunning) {
-            [self.session startRunning];
-            SneakyLog(@"Photo session running.");
+        if (self.captureSession) {
+            if (completion) completion(YES);
+            return;
         }
 
-        [NSThread sleepForTimeInterval:0.4];
+        self.captureSession = [[AVCaptureSession alloc] init];
+        [self.captureSession beginConfiguration];
 
-        AVCapturePhotoSettings *settings = [AVCapturePhotoSettings photoSettings];
-        settings.highResolutionPhotoEnabled = YES;
-        [self.photoOutput capturePhotoWithSettings:settings delegate:self];
-        SneakyLog(@"High-Res Photo capture dispatched.");
+        if ([self.captureSession canSetSessionPreset:AVCaptureSessionPreset1920x1080]) {
+            self.captureSession.sessionPreset = AVCaptureSessionPreset1920x1080;
+        } else {
+            self.captureSession.sessionPreset = AVCaptureSessionPresetHigh;
+        }
+
+        // Camera Input
+        AVCaptureDevicePosition desiredPosition = (kCameraPosition == 1) ? AVCaptureDevicePositionFront : AVCaptureDevicePositionBack;
+        AVCaptureDevice *videoDevice = [AVCaptureDevice defaultDeviceWithDeviceType:AVCaptureDeviceTypeBuiltInWideAngleCamera
+                                                                         mediaType:AVMediaTypeVideo
+                                                                          position:desiredPosition];
+        NSError *videoError = nil;
+        AVCaptureDeviceInput *videoInput = [AVCaptureDeviceInput deviceInputWithDevice:videoDevice error:&videoError];
+        if (!videoError && [self.captureSession canAddInput:videoInput]) {
+            [self.captureSession addInput:videoInput];
+        } else {
+            [self.captureSession commitConfiguration];
+            if (completion) completion(NO);
+            return;
+        }
+
+        // Audio Input
+        AVCaptureDevice *audioDevice = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeAudio];
+        NSError *audioError = nil;
+        AVCaptureDeviceInput *audioInput = [AVCaptureDeviceInput deviceInputWithDevice:audioDevice error:&audioError];
+        if (!audioError && [self.captureSession canAddInput:audioInput]) {
+            [self.captureSession addInput:audioInput];
+        }
+
+        // Movie File Output
+        self.movieOutput = [[AVCaptureMovieFileOutput alloc] init];
+        if ([self.captureSession canAddOutput:self.movieOutput]) {
+            [self.captureSession addOutput:self.movieOutput];
+        } else {
+            [self.captureSession commitConfiguration];
+            if (completion) completion(NO);
+            return;
+        }
+
+        [self.captureSession commitConfiguration];
+        if (completion) completion(YES);
     });
 }
 
-- (void)toggleVideoRecording {
-    if (self.isRecording) {
-        SneakyLog(@"Stopping recording. Total frames received: %ld", (long)self.frameCount);
-        self.shouldWriteFrames = NO;
-        self.isRecording = NO;
-        [[SneakyDotIndicator sharedInstance] hide];
-
-        dispatch_async(self.videoQueue, ^{
-            if (self.assetWriter) {
-                [self.assetWriterInput markAsFinished];
-                [self.assetWriter finishWritingWithCompletionHandler:^{
-                    SneakyLog(@"AVAssetWriter finishWriting complete. Status: %ld", (long)self.assetWriter.status);
-
-                    BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:self.currentOutputURL.path];
-                    unsigned long long size = [[[NSFileManager defaultManager] attributesOfItemAtPath:self.currentOutputURL.path error:nil] fileSize];
-                    SneakyLog(@"Encoded File: %@ (Size: %llu bytes)", self.currentOutputURL.path, size);
-
-                    if (exists && size > 0) {
-                        NSDictionary *prefs = getPreferences();
-                        NSInteger saveLocation = prefs[@"SaveLocation"] ? [prefs[@"SaveLocation"] integerValue] : 0;
-
-                        if (saveLocation == 0) {
-                            SneakyLog(@"[Camera Roll Mode] Exporting video to Photos App...");
-                            if (UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(self.currentOutputURL.path)) {
-                                UISaveVideoAtPathToSavedPhotosAlbum(self.currentOutputURL.path, self, @selector(video:didFinishSavingWithError:contextInfo:), nil);
-                            }
-                        } else {
-                            SneakyLog(@"[Documents Mode] Video saved to: %@", self.currentOutputURL.path);
-                        }
-                    }
-
-                    self.assetWriter = nil;
-                    self.assetWriterInput = nil;
-                    self.isSessionStarted = NO;
-
-                    dispatch_async(self.sessionQueue, ^{
-                        if (self.session.isRunning) {
-                            [self.session stopRunning];
-                            SneakyLog(@"Capture session stopped.");
-                        }
-                    });
-                }];
-            }
-        });
+- (void)toggleRecording {
+    if (!self.isRecording) {
+        [self startRecording];
     } else {
-        SneakyLog(@"Starting video recording...");
-        self.frameCount = 0;
+        [self stopRecording];
+    }
+}
+
+- (void)startRecording {
+    [self setupSessionWithCompletion:^(BOOL success) {
+        if (!success) return;
 
         dispatch_async(self.sessionQueue, ^{
-            [self configureSessionForMode:1];
-
-            if (!self.session.isRunning) {
-                [self.session startRunning];
-                SneakyLog(@"Camera session running.");
+            if (!self.captureSession.isRunning) {
+                [self.captureSession startRunning];
             }
 
-            NSString *dir = @"/var/mobile/Documents/SneakyCam";
-            [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-            NSString *fileName = [NSString stringWithFormat:@"SneakyCam_%ld.mp4", (long)[[NSDate date] timeIntervalSince1970]];
-            self.currentOutputURL = [NSURL fileURLWithPath:[dir stringByAppendingPathComponent:fileName]];
-            [[NSFileManager defaultManager] removeItemAtURL:self.currentOutputURL error:nil];
+            NSString *fileName = [NSString stringWithFormat:@"sneakycam_%lld.mov", (long long)[[NSDate date] timeIntervalSince1970]];
+            NSString *filePath = [NSTemporaryDirectory() stringByAppendingPathComponent:fileName];
+            NSURL *outputURL = [NSURL fileURLWithPath:filePath];
 
-            NSError *err = nil;
-            self.assetWriter = [AVAssetWriter assetWriterWithURL:self.currentOutputURL fileType:AVFileTypeMPEG4 error:&err];
+            [[NSFileManager defaultManager] removeItemAtURL:outputURL error:nil];
 
-            NSDictionary *outputSettings = @{
-                AVVideoCodecKey: AVVideoCodecTypeH264,
-                AVVideoWidthKey: @(self.videoWidth > 0 ? self.videoWidth : 1920),
-                AVVideoHeightKey: @(self.videoHeight > 0 ? self.videoHeight : 1080)
-            };
-
-            self.assetWriterInput = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeVideo outputSettings:outputSettings];
-            self.assetWriterInput.expectsMediaDataInRealTime = YES;
-
-            if ([self.assetWriter canAddInput:self.assetWriterInput]) {
-                [self.assetWriter addInput:self.assetWriterInput];
-            }
-
-            [self.assetWriter startWriting];
-            self.isSessionStarted = NO;
-            self.shouldWriteFrames = YES;
+            [self.movieOutput startRecordingToOutputFileURL:outputURL recordingDelegate:self];
             self.isRecording = YES;
 
-            dispatch_async(dispatch_get_main_queue(), ^{
-                NSDictionary *prefs = getPreferences();
-                if (prefs[@"ShowIndicatorDot"] ? [prefs[@"ShowIndicatorDot"] boolValue] : YES) {
-                    [[SneakyDotIndicator sharedInstance] show];
-                }
-            });
+            AudioServicesPlaySystemSound(1519); // Start vibration
         });
-    }
+    }];
 }
 
-// Frame Processing Callback
-- (void)captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection {
-    if (!self.shouldWriteFrames || !self.assetWriter) {
-        return;
-    }
-
-    self.frameCount++;
-    if (self.frameCount <= 3) {
-        SneakyLog(@"Received frame #%ld (%ldx%ld)", (long)self.frameCount, (long)self.videoWidth, (long)self.videoHeight);
-    }
-
-    if (self.assetWriter.status != AVAssetWriterStatusWriting) {
-        return;
-    }
-
-    CMTime timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
-
-    if (!self.isSessionStarted) {
-        [self.assetWriter startSessionAtSourceTime:timestamp];
-        self.isSessionStarted = YES;
-        SneakyLog(@"Writer session started at: %lld", timestamp.value);
-    }
-
-    if (self.assetWriterInput.isReadyForMoreMediaData) {
-        [self.assetWriterInput appendSampleBuffer:sampleBuffer];
-    }
-}
-
-// Photos Video Export Callback
-- (void)video:(NSString *)videoPath didFinishSavingWithError:(NSError *)error contextInfo:(void *)contextInfo {
-    if (error) {
-        SneakyLog(@"Photos Album export error: %@", error.localizedDescription);
-    } else {
-        SneakyLog(@"Saved to Photos Camera Roll. Removing working file.");
-        [[NSFileManager defaultManager] removeItemAtPath:videoPath error:nil];
-    }
-}
-
-// Photo Capture Callback
-- (void)captureOutput:(AVCapturePhotoOutput *)output didFinishProcessingPhoto:(AVCapturePhoto *)photo error:(NSError *)error {
-    if (error) {
-        SneakyLog(@"Photo Error: %@", error.localizedDescription);
-        return;
-    }
-
-    NSData *data = [photo fileDataRepresentation];
-    if (!data) return;
-
-    UIImage *image = [UIImage imageWithData:data];
-    NSDictionary *prefs = getPreferences();
-    NSInteger saveLocation = prefs[@"SaveLocation"] ? [prefs[@"SaveLocation"] integerValue] : 0;
-
-    NSString *dir = @"/var/mobile/Documents/SneakyCam";
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString *dest = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"SneakyCam_%ld.jpg", (long)[[NSDate date] timeIntervalSince1970]]];
-    [data writeToFile:dest atomically:YES];
-
-    if (saveLocation == 0 && image) {
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
-        [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
-        SneakyLog(@"Photo exported to Photos Camera Roll.");
-    } else {
-        SneakyLog(@"Photo saved to Documents: %@", dest);
-    }
-
+- (void)stopRecording {
     dispatch_async(self.sessionQueue, ^{
-        if (self.session.isRunning) {
-            [self.session stopRunning];
-            SneakyLog(@"Photo session stopped.");
+        if (self.movieOutput.isRecording) {
+            [self.movieOutput stopRecording];
+        }
+        self.isRecording = NO;
+        AudioServicesPlaySystemSound(1521); // Stop vibration
+    });
+}
+
+// MARK: - AVCaptureFileOutputRecordingDelegate
+- (void)captureOutput:(AVCaptureFileOutput *)output 
+didFinishRecordingToOutputFileAtURL:(NSURL *)outputFileURL 
+      fromConnections:(NSArray<AVCaptureConnection *> *)connections 
+                error:(NSError *)error {
+    
+    dispatch_async(self.sessionQueue, ^{
+        if (self.captureSession.isRunning) {
+            [self.captureSession stopRunning];
         }
     });
+
+    if (error && ![[error.userInfo objectForKey:AVErrorRecordingSuccessfullyFinishedKey] boolValue]) {
+        [[NSFileManager defaultManager] removeItemAtURL:outputFileURL error:nil];
+        return;
+    }
+
+    [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
+        if (status == PHAuthorizationStatusAuthorized || status == PHAuthorizationStatusLimited) {
+            [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+                [PHAssetChangeRequest creationRequestForAssetFromVideoAtFileURL:outputFileURL];
+            } completionHandler:^(BOOL success, NSError * _Nullable saveError) {
+                [[NSFileManager defaultManager] removeItemAtURL:outputFileURL error:nil];
+            }];
+        } else {
+            [[NSFileManager defaultManager] removeItemAtURL:outputFileURL error:nil];
+        }
+    }];
 }
 
 @end
 
-// ==========================================
-// GROUP 1: Mediaserverd Hooks (com.apple.celestial)
-// ==========================================
-%group MediaserverdHooks
+// MARK: - SpringBoard Volume Button Hooks
+%hook SBVolumeHardwareButtonActions
 
-%hook FigCaptureClientSessionMonitor
-
-- (void)_updateClientStateCondition:(id)condition newValue:(id)newValue {
-    %orig(condition, @NO);
-}
-
-%end
-
-%end
-
-// ==========================================
-// GROUP 2: SpringBoard Hooks (com.apple.springboard)
-// ==========================================
-%group SpringBoardHooks
-
-%hook SBVolumeControl
-
-- (void)handleVolumeButtonWithType:(long long)type down:(BOOL)down {
-    if (down) {
-        [[SneakyRecorder sharedInstance] triggerCapture];
+- (void)volumeIncreasePress:(id)arg1 {
+    if (kEnabled) {
+        [[BackgroundRecorder sharedInstance] toggleRecording];
     }
-    %orig;
+    %orig(arg1);
 }
 
 %end
 
-%end
-
-// ==========================================
-// CONSTRUCTOR: Process Routing
-// ==========================================
+// MARK: - Constructor
 %ctor {
-    NSString *processName = [[NSProcessInfo processInfo] processName];
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-
-    if ([bundleID isEqualToString:@"com.apple.springboard"] || [processName isEqualToString:@"SpringBoard"]) {
-        %init(SpringBoardHooks);
-        NSLog(@"[SneakyCam] Initialized in SpringBoard.");
-    } else {
-        %init(MediaserverdHooks);
-        NSLog(@"[SneakyCam] Initialized in mediaserverd.");
-    }
+    loadPreferences();
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        NULL,
+        (CFNotificationCallback)loadPreferences,
+        (__bridge CFStringRef)kPrefNotification,
+        NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately
+    );
 }

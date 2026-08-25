@@ -4,7 +4,6 @@
 <dict>
     <key>items</key>
     <array>
-        <!-- General Settings Group -->
         <dict>
             <key>cell</key>
             <string>PSGroupCell</string>
@@ -17,63 +16,35 @@
             <key>default</key>
             <true/>
             <key>defaults</key>
-            <string>com.sparkdev.sneakycam</string>
+            <string>com.autt.sneakycamprefs</string>
             <key>key</key>
-            <string>Enabled</string>
+            <string>enabled</string>
             <key>label</key>
             <string>Enable Tweak</string>
+            <key>PostNotification</key>
+            <string>com.autt.sneakycamprefs/PreferencesChanged</string>
         </dict>
         <dict>
             <key>cell</key>
             <string>PSSwitchCell</string>
             <key>default</key>
-            <true/>
+            <false/>
             <key>defaults</key>
-            <string>com.sparkdev.sneakycam</string>
+            <string>com.autt.sneakycamprefs</string>
             <key>key</key>
-            <string>HapticFeedback</string>
+            <string>showStatusBarIndicator</string>
             <key>label</key>
-            <string>Haptic Feedback</string>
+            <string>Show Status Bar Indicator</string>
+            <key>PostNotification</key>
+            <string>com.autt.sneakycamprefs/PreferencesChanged</string>
         </dict>
-        <dict>
-            <key>cell</key>
-            <string>PSSwitchCell</string>
-            <key>default</key>
-            <true/>
-            <key>defaults</key>
-            <string>com.sparkdev.sneakycam</string>
-            <key>key</key>
-            <string>ShowIndicatorDot</string>
-            <key>label</key>
-            <string>Show Status Bar Recording Dot</string>
-        </dict>
-
-        <!-- Capture Options Group -->
         <dict>
             <key>cell</key>
             <string>PSGroupCell</string>
             <key>label</key>
-            <string>Capture Options</string>
-        </dict>
-        <dict>
-            <key>cell</key>
-            <string>PSSegmentCell</string>
-            <key>default</key>
-            <integer>1</integer>
-            <key>defaults</key>
-            <string>com.sparkdev.sneakycam</string>
-            <key>key</key>
-            <string>CaptureMode</string>
-            <key>validTitles</key>
-            <array>
-                <string>Photo</string>
-                <string>Video</string>
-            </array>
-            <key>validValues</key>
-            <array>
-                <integer>0</integer>
-                <integer>1</integer>
-            </array>
+            <string>Camera Source</string>
+            <key>footerText</key>
+            <string>Press Volume Up to start or stop recording.</string>
         </dict>
         <dict>
             <key>cell</key>
@@ -81,9 +52,9 @@
             <key>default</key>
             <integer>0</integer>
             <key>defaults</key>
-            <string>com.sparkdev.sneakycam</string>
+            <string>com.autt.sneakycamprefs</string>
             <key>key</key>
-            <string>CameraSource</string>
+            <string>cameraPosition</string>
             <key>validTitles</key>
             <array>
                 <string>Back Camera</string>
@@ -94,68 +65,8 @@
                 <integer>0</integer>
                 <integer>1</integer>
             </array>
-        </dict>
-
-        <!-- Video Quality Settings -->
-        <dict>
-            <key>cell</key>
-            <string>PSGroupCell</string>
-            <key>label</key>
-            <string>Video Quality</string>
-        </dict>
-        <dict>
-            <key>cell</key>
-            <string>PSLinkListCell</string>
-            <key>default</key>
-            <string>AVCaptureSessionPreset3840x2160</string>
-            <key>defaults</key>
-            <string>com.sparkdev.sneakycam</string>
-            <key>detail</key>
-            <string>PSListItemsController</string>
-            <key>key</key>
-            <string>VideoQuality</string>
-            <key>label</key>
-            <string>Quality</string>
-            <key>validTitles</key>
-            <array>
-                <string>4K UHD (2160p @ 30fps)</string>
-                <string>Full HD (1080p @ 30fps)</string>
-                <string>HD (720p @ 30fps)</string>
-            </array>
-            <key>validValues</key>
-            <array>
-                <string>AVCaptureSessionPreset3840x2160</string>
-                <string>AVCaptureSessionPreset1920x1080</string>
-                <string>AVCaptureSessionPreset1280x720</string>
-            </array>
-        </dict>
-
-        <!-- Save Location -->
-        <dict>
-            <key>cell</key>
-            <string>PSGroupCell</string>
-            <key>label</key>
-            <string>Save Location</string>
-        </dict>
-        <dict>
-            <key>cell</key>
-            <string>PSSegmentCell</string>
-            <key>default</key>
-            <integer>0</integer>
-            <key>defaults</key>
-            <string>com.sparkdev.sneakycam</string>
-            <key>key</key>
-            <string>SaveLocation</string>
-            <key>validTitles</key>
-            <array>
-                <string>Camera Roll (Photos)</string>
-                <string>Documents Folder</string>
-            </array>
-            <key>validValues</key>
-            <array>
-                <integer>0</integer>
-                <integer>1</integer>
-            </array>
+            <key>PostNotification</key>
+            <string>com.autt.sneakycamprefs/PreferencesChanged</string>
         </dict>
     </array>
     <key>title</key>
