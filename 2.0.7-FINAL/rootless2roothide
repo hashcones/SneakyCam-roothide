@@ -1,0 +1,53 @@
+#!/bin/bash
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <path_to_rootless.deb>"
+    exit 1
+fi
+
+INPUT_DEB="$1"
+WORK_DIR="work_roothide_$(date +%s)"
+OUTPUT_DEB="${INPUT_DEB%.deb}_roothide.deb"
+
+echo "[*] Extracting rootless deb..."
+mkdir -p "$WORK_DIR/extracted"
+dpkg-deb -x "$INPUT_DEB" "$WORK_DIR/extracted"
+dpkg-deb -e "$INPUT_DEB" "$WORK_DIR/extracted/DEBIAN"
+
+CONTROL_FILE="$WORK_DIR/extracted/DEBIAN/control"
+
+if [ ! -f "$CONTROL_FILE" ]; then
+    echo "[-] Error: Control file not found!"
+    rm -rf "$WORK_DIR"
+    exit 1
+fi
+
+echo "[*] Modifying control configuration for RootHide specs..."
+# Extract package name for tracking dependencies
+PKG_NAME=$(grep -i "^Package:" "$CONTROL_FILE" | awk '{print $2}')
+PKG_VERSION=$(grep -i "^Version:" "$CONTROL_FILE" | awk '{print $2}')
+
+# Append ~roothide to version if not already present
+if [[ "$PKG_VERSION" != *"~roothide"* ]]; then
+    NEW_VERSION="${PKG_VERSION}~roothide"
+    sed -i "s/^Version: .*/Version: $NEW_VERSION/" "$CONTROL_FILE"
+else
+    NEW_VERSION="$PKG_VERSION"
+fi
+
+# Add RootHide Pre-Depends rules
+# RootHide requires patches mapping linkage
+PATCH_DEPENDS="patches-${PKG_NAME} (= ${NEW_VERSION})"
+if grep -q "^Pre-Depends:" "$CONTROL_FILE"; then
+    sed -i "/^Pre-Depends:/ s/$/, $PATCH_DEPENDS/" "$CONTROL_FILE"
+else
+    echo "Pre-Depends: $PATCH_DEPENDS, com.roothide.patchloader" >> "$CONTROL_FILE"
+fi
+
+echo "[*] Repackaging to RootHide layout..."
+dpkg-deb -b "$WORK_DIR/extracted" "$OUTPUT_DEB"
+
+# Cleanup
+rm -rf "$WORK_DIR"
+echo "[+] Successfully created RootHide-ready deb: $OUTPUT_DEB"
+echo "[!] Note: Binaries inside this package may still require manual Mach-O string patching or a dynamic patching companion module if they utilize absolute paths outside standard environment variables."

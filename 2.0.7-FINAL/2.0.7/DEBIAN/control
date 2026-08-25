@@ -1,4 +1,4 @@
-Package: com.spark.sbeakycam
+Package: com.spark.sneakycam
 Name: SneakyCam
 Depends: mobilesubstrate, preferenceloader
 Architecture: iphoneos-arm64

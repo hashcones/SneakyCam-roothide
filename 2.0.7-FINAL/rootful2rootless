@@ -1,0 +1,53 @@
+#!/bin/bash
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <path_to_rootful.deb>"
+    exit 1
+fi
+
+INPUT_DEB="$1"
+WORK_DIR="work_rootful_$(date +%s)"
+OUTPUT_DEB="${INPUT_DEB%.deb}_rootless.deb"
+
+echo "[*] Setting up workspace..."
+mkdir -p "$WORK_DIR/extracted" "$WORK_DIR/new_payload"
+dpkg-deb -x "$INPUT_DEB" "$WORK_DIR/extracted"
+dpkg-deb -e "$INPUT_DEB" "$WORK_DIR/extracted/DEBIAN"
+
+echo "[*] Shifting payload files to /var/jb..."
+# Rootless places standard paths under /var/jb
+mkdir -p "$WORK_DIR/new_payload/var/jb"
+
+# Move standard rootful directories under /var/jb if they exist
+for dir in Library Applications usr bin sbinetc; do
+    if [ -d "$WORK_DIR/extracted/$dir" ]; then
+        mv "$WORK_DIR/extracted/$dir" "$WORK_DIR/new_payload/var/jb/"
+    fi
+done
+
+# Handle any remaining files, avoiding duplication of DEBIAN
+find "$WORK_DIR/extracted" -mindepth 1 -maxdepth 1 ! -name 'DEBIAN' -exec mv {} "$WORK_DIR/new_payload/var/jb/" \;
+
+echo "[*] Updating DEBIAN/control metadata..."
+CONTROL_FILE="$WORK_DIR/extracted/DEBIAN/control"
+
+if [ -f "$CONTROL_FILE" ]; then
+    # Append rootless architecture indicator if needed and modify dependency trees
+    sed -i 's/Architecture: iphoneos-arm/Architecture: iphoneos-arm64/g' "$CONTROL_FILE"
+    
+    # Check if Pre-Depends exists, if not add it
+    if grep -q "^Pre-Depends:" "$CONTROL_FILE"; then
+        sed -i '/^Pre-Depends:/ s/$/, firmware (>= 15.0)/' "$CONTROL_FILE"
+    else
+        echo "Pre-Depends: firmware (>= 15.0)" >> "$CONTROL_FILE"
+    fi
+fi
+
+echo "[*] Rebuilding package..."
+mkdir -p "$(dirname "$OUTPUT_DEB")"
+cp -r "$WORK_DIR/extracted/DEBIAN" "$WORK_DIR/new_payload/"
+dpkg-deb -b "$WORK_DIR/new_payload" "$OUTPUT_DEB"
+
+# Cleanup
+rm -rf "$WORK_DIR"
+echo "[+] Successfully created rootless deb: $OUTPUT_DEB"
