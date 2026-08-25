@@ -8,6 +8,7 @@
         <array>
             <string>com.apple.springboard</string>
             <string>com.apple.UIKit</string>
+            <string>com.apple.mediaserverd</string>
         </array>
     </dict>
 </dict>

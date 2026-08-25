@@ -16,13 +16,13 @@
             <key>default</key>
             <true/>
             <key>defaults</key>
-            <string>com.autt.sneakycamprefs</string>
+            <string>com.spark.sneakycamprefs</string>
             <key>key</key>
             <string>enabled</string>
             <key>label</key>
             <string>Enable Tweak</string>
             <key>PostNotification</key>
-            <string>com.autt.sneakycamprefs/PreferencesChanged</string>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
         </dict>
         <dict>
             <key>cell</key>
@@ -30,21 +30,130 @@
             <key>default</key>
             <false/>
             <key>defaults</key>
-            <string>com.autt.sneakycamprefs</string>
+            <string>com.spark.sneakycamprefs</string>
             <key>key</key>
             <string>showStatusBarIndicator</string>
             <key>label</key>
             <string>Show Status Bar Indicator</string>
             <key>PostNotification</key>
-            <string>com.autt.sneakycamprefs/PreferencesChanged</string>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
         </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.spark.sneakycamprefs</string>
+            <key>key</key>
+            <string>hideVolumeHUD</string>
+            <key>label</key>
+            <string>Suppress Volume HUD</string>
+            <key>PostNotification</key>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.spark.sneakycamprefs</string>
+            <key>key</key>
+            <string>enableHaptics</string>
+            <key>label</key>
+            <string>Haptic Feedback</string>
+            <key>PostNotification</key>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.spark.sneakycamprefs</string>
+            <key>key</key>
+            <string>saveToPhotos</string>
+            <key>label</key>
+            <string>Save to Camera Roll</string>
+            <key>PostNotification</key>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
+        </dict>
+
+        <!-- MARK: - Celestial Audio Configuration -->
         <dict>
             <key>cell</key>
             <string>PSGroupCell</string>
             <key>label</key>
-            <string>Camera Source</string>
+            <string>Celestial Audio Settings</string>
             <key>footerText</key>
-            <string>Press Volume Up to start or stop recording.</string>
+            <string>Mutes hardware shutter sounds via the Celestial media subsystem.</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.spark.sneakycamprefs</string>
+            <key>key</key>
+            <string>muteShutterSound</string>
+            <key>label</key>
+            <string>Mute Shutter Sound (Celestial)</string>
+            <key>PostNotification</key>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.spark.sneakycamprefs</string>
+            <key>key</key>
+            <string>recordAudio</string>
+            <key>label</key>
+            <string>Record Audio (Video Mode)</string>
+            <key>PostNotification</key>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
+        </dict>
+
+        <!-- MARK: - Capture Mode & Triggers -->
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>Capture Mode</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSSegmentCell</string>
+            <key>default</key>
+            <integer>1</integer>
+            <key>defaults</key>
+            <string>com.spark.sneakycamprefs</string>
+            <key>key</key>
+            <string>captureMode</string>
+            <key>validTitles</key>
+            <array>
+                <string>Photo</string>
+                <string>Video</string>
+            </array>
+            <key>validValues</key>
+            <array>
+                <integer>0</integer>
+                <integer>1</integer>
+            </array>
+            <key>PostNotification</key>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>Camera Lens Position</string>
         </dict>
         <dict>
             <key>cell</key>
@@ -52,7 +161,7 @@
             <key>default</key>
             <integer>0</integer>
             <key>defaults</key>
-            <string>com.autt.sneakycamprefs</string>
+            <string>com.spark.sneakycamprefs</string>
             <key>key</key>
             <string>cameraPosition</string>
             <key>validTitles</key>
@@ -66,7 +175,105 @@
                 <integer>1</integer>
             </array>
             <key>PostNotification</key>
-            <string>com.autt.sneakycamprefs/PreferencesChanged</string>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>Physical Trigger</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSLinkListCell</string>
+            <key>default</key>
+            <integer>0</integer>
+            <key>defaults</key>
+            <string>com.spark.sneakycamprefs</string>
+            <key>detail</key>
+            <string>PSListItemsController</string>
+            <key>key</key>
+            <string>triggerMethod</string>
+            <key>label</key>
+            <string>Activation Action</string>
+            <key>validTitles</key>
+            <array>
+                <string>Volume Up</string>
+                <string>Volume Down</string>
+                <string>Both Volume Buttons</string>
+            </array>
+            <key>validValues</key>
+            <array>
+                <integer>0</integer>
+                <integer>1</integer>
+                <integer>2</integer>
+            </array>
+            <key>PostNotification</key>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>Video Resolution Preset</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSLinkListCell</string>
+            <key>default</key>
+            <string>AVCaptureSessionPreset1920x1080</string>
+            <key>defaults</key>
+            <string>com.spark.sneakycamprefs</string>
+            <key>detail</key>
+            <string>PSListItemsController</string>
+            <key>key</key>
+            <string>videoQuality</string>
+            <key>label</key>
+            <string>Video Quality</string>
+            <key>validTitles</key>
+            <array>
+                <string>1080p Full HD</string>
+                <string>720p HD</string>
+                <string>480p SD</string>
+                <string>High (Auto)</string>
+            </array>
+            <key>validValues</key>
+            <array>
+                <string>AVCaptureSessionPreset1920x1080</string>
+                <string>AVCaptureSessionPreset1280x720</string>
+                <string>AVCaptureSessionPreset640x480</string>
+                <string>AVCaptureSessionPresetHigh</string>
+            </array>
+            <key>PostNotification</key>
+            <string>com.spark.sneakycamprefs/PreferencesChanged</string>
+        </dict>
+
+        <!-- MARK: - Actions & Maintenance -->
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>Diagnostics &amp; Maintenance</string>
+            <key>footerText</key>
+            <string>Logs are stored at /var/mobile/Documents/SneakyCam.log</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSButtonCell</string>
+            <key>action</key>
+            <string>clearLogFile</string>
+            <key>label</key>
+            <string>Clear Log File</string>
+        </dict>
+        <dict>
+            <key>cell</key>
+            <string>PSButtonCell</string>
+            <key>action</key>
+            <string>respring</string>
+            <key>label</key>
+            <string>Respring SpringBoard</string>
         </dict>
     </array>
     <key>title</key>

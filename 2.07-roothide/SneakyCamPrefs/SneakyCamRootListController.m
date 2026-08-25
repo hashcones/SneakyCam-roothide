@@ -1,40 +1,30 @@
 #import "SneakyCamRootListController.h"
-
-// 1. Forward-declare SneakyRecorder so Clang knows the method signatures
-@interface SneakyRecorder : NSObject
-+ (instancetype)sharedInstance;
-- (void)triggerCapture;
-@end
+#import <spawn.h>
 
 @implementation SneakyCamRootListController
 
 - (NSArray *)specifiers {
     if (!_specifiers) {
-        NSBundle *bundle = [NSBundle bundleForClass:[self class]];
-        _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self bundle:bundle];
+        _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
     }
     return _specifiers;
 }
 
-- (id)readPreferenceValue:(PSSpecifier *)specifier {
-    NSString *path = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", specifier.properties[@"defaults"]];
-    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:path];
-    return settings[specifier.properties[@"key"]] ?: specifier.properties[@"default"];
+- (void)respring {
+    pid_t pid;
+    const char *args[] = {"killall", "-9", "SpringBoard", NULL};
+    posix_spawn(&pid, "/usr/bin/killall", NULL, NULL, (char *const *)args, NULL);
 }
 
-- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
-    NSString *path = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", specifier.properties[@"defaults"]];
-    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:path] ?: [NSMutableDictionary dictionary];
-    [settings setObject:value forKey:specifier.properties[@"key"]];
-    [settings writeToFile:path atomically:YES];
-}
+- (void)clearLogFile {
+    NSString *logPath = @"/var/mobile/Documents/SneakyCam.log";
+    [[NSFileManager defaultManager] removeItemAtPath:logPath error:nil];
 
-// 2. Test button action
-- (void)testCapture {
-    Class recorderClass = NSClassFromString(@"SneakyRecorder");
-    if (recorderClass) {
-        [[recorderClass sharedInstance] triggerCapture];
-    }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"SneakyCam"
+                                                                   message:@"Log file cleared successfully."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 @end
