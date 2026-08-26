@@ -2,60 +2,92 @@
 set -e
 
 if [ "$#" -ne 1 ]; then
-    echo "Usage: $0 <path_to_rootful_arm64.deb>"
+    echo "Usage: $0 <path_to_deb>"
     exit 1
 fi
 
 INPUT_DEB="$1"
 BASE_NAME="$(basename "$INPUT_DEB" .deb)"
-WORK_DIR="work_roothide_$(date +%s)"
-OUTPUT_DEB="${BASE_NAME}_iphoneos-arm64e.deb"
+WORK_DIR="work_patcher_$(date +%s)"
+OUTPUT_DEB="${BASE_NAME}_roothide.deb"
 
-echo "[*] Unpacking rootful deb..."
-mkdir -p "$WORK_DIR/pkg"
+# Check required commands
+for cmd in dpkg-deb ar tar awk sed ldid install_name_tool otool; do
+    if ! command -v "$cmd" &> /dev/null; then
+        echo "[-] Error: Required command '$cmd' is not installed."
+        exit 1
+    fi
+done
+
+echo "[*] Initializing workspace..."
+mkdir -p "$WORK_DIR/pkg" "$WORK_DIR/extracted"
 dpkg-deb -R "$INPUT_DEB" "$WORK_DIR/pkg"
 
 CONTROL_FILE="$WORK_DIR/pkg/DEBIAN/control"
-
 if [ ! -f "$CONTROL_FILE" ]; then
-    echo "[-] Error: DEBIAN/control file not found!"
+    echo "[-] Error: DEBIAN/control not found!"
     rm -rf "$WORK_DIR"
     exit 1
 fi
 
-echo "[*] Patching DEBIAN/control..."
-
-# 1. Update Architecture to iphoneos-arm64e
+echo "[*] Step 1: Adjusting DEBIAN/control metadata..."
+# Update Architecture
 if grep -qi "^Architecture:" "$CONTROL_FILE"; then
     sed -i 's/^Architecture:.*/Architecture: iphoneos-arm64e/I' "$CONTROL_FILE"
 else
     echo "Architecture: iphoneos-arm64e" >> "$CONTROL_FILE"
 fi
 
-# 2. Append ~roothide to Version if missing
+# Append ~roothide to version
 CURRENT_VERSION=$(grep -i "^Version:" "$CONTROL_FILE" | head -n 1 | awk '{print $2}')
 if [[ "$CURRENT_VERSION" != *"~roothide"* ]]; then
     NEW_VERSION="${CURRENT_VERSION}~roothide"
     sed -i "s/^Version:.*/Version: $NEW_VERSION/I" "$CONTROL_FILE"
 fi
 
-# 3. Update or add mobilesubstrate dependency
-if grep -qi "^Depends:" "$CONTROL_FILE"; then
-    # Ensure mobilesubstrate constraint is compatible
-    if grep -q "mobilesubstrate" "$CONTROL_FILE"; then
-        sed -i 's/mobilesubstrate *([^)]*)/mobilesubstrate (>= 0.9.5000)/g' "$CONTROL_FILE"
-    fi
+# Inject RootHide patch loader dependency
+PKG_NAME=$(grep -i "^Package:" "$CONTROL_FILE" | head -n 1 | awk '{print $2}')
+PATCH_DEPENDS="patches-${PKG_NAME} (= ${NEW_VERSION})"
+if grep -qi "^Pre-Depends:" "$CONTROL_FILE"; then
+    sed -i "/^Pre-Depends:/ s/$/, $PATCH_DEPENDS/" "$CONTROL_FILE"
+else
+    echo "Pre-Depends: $PATCH_DEPENDS, com.roothide.patchloader" >> "$CONTROL_FILE"
 fi
 
-# 4. Clean up maintainer script permissions
-echo "[*] Setting permissions on DEBIAN scripts..."
+echo "[*] Step 2: Processing Mach-O binaries and dylibs..."
+# Find all executables, dylibs, and bundles to rewrite link paths for RootHide
+find "$WORK_DIR/pkg" -type f | while read -r file; do
+    # Check if it's a Mach-O file using file command or otool header check
+    if otool -h "$file" &> /dev/null; then
+        echo "    -> Patching Mach-O headers in: $(basename "$file")"
+        
+        # Rewrite absolute /var/jb or /Library reference paths to use dynamic @loader_path/.jbroot mapping
+        # RootHide expects dependencies to point through @loader_path/.jbroot/
+        otool -L "$file" | awk '{print $1}' | grep -E '^(/var/jb|/Library|/usr)' | while read -r old_path; do
+            new_path="\@loader_path/.jbroot${old_path#/var/jb}"
+            # Handle rootful style paths if package originated from rootful
+            new_path=$(echo "$new_path" | sed 's|@loader_path/.jbroot/Library|@loader_path/.jbroot/var/jb/Library|g')
+            
+            echo "       Replacing dependency: $old_path -> $new_path"
+            install_name_tool -change "$old_path" "$new_path" "$file" 2>/dev/null || true
+        done
+        
+        # Set a proper rpath if missing
+        install_name_tool -add_rpath "@loader_path/.jbroot/usr/lib" "$file" 2>/dev/null || true
+
+        # Re-sign the binary using ldid with ad-hoc/root-sandbox signatures
+        if command -v ldid &> /dev/null; then
+            ldid -S "$file" 2>/dev/null || true
+        fi
+    fi
+done
+
+echo "[*] Step 3: Setting correct permissions on maintainer scripts..."
 find "$WORK_DIR/pkg/DEBIAN" -type f ! -name "control" -exec chmod 755 {} +
 
-# 5. Build the final RootHide .deb package
-echo "[*] Repackaging deb for RootHide..."
+echo "[*] Step 4: Repackaging into RootHide-compliant .deb..."
 dpkg-deb -Zxz --root-owner-group -b "$WORK_DIR/pkg" "$OUTPUT_DEB"
 
-# Cleanup workspace
+# Cleanup
 rm -rf "$WORK_DIR"
-
-echo "[+] Successfully created RootHide package: $OUTPUT_DEB"
+echo "[+] Success! Created package: $OUTPUT_DEB"
