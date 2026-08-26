@@ -45,13 +45,11 @@ if [[ "$CURRENT_VERSION" != *"~roothide"* ]]; then
     sed -i "s/^Version:.*/Version: $NEW_VERSION/I" "$CONTROL_FILE"
 fi
 
-# Inject RootHide patch loader dependency
-PKG_NAME=$(grep -i "^Package:" "$CONTROL_FILE" | head -n 1 | awk '{print $2}')
-PATCH_DEPENDS="patches-${PKG_NAME} (= ${NEW_VERSION})"
-if grep -qi "^Pre-Depends:" "$CONTROL_FILE"; then
-    sed -i "/^Pre-Depends:/ s/$/, $PATCH_DEPENDS/" "$CONTROL_FILE"
-else
-    echo "Pre-Depends: $PATCH_DEPENDS, com.roothide.patchloader" >> "$CONTROL_FILE"
+# Ensure standard RootHide dependencies without creating phantom 'patches-' dependencies
+if grep -qi "^Depends:" "$CONTROL_FILE"; then
+    if ! grep -q "mobilesubstrate" "$CONTROL_FILE"; then
+        sed -i 's/^Depends: */Depends: mobilesubstrate (>= 0.9.5000), /' "$CONTROL_FILE"
+    fi
 fi
 
 echo "[*] Step 2: Processing Mach-O binaries and dylibs..."
