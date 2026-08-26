@@ -11,81 +11,59 @@ BASE_NAME="$(basename "$INPUT_DEB" .deb)"
 WORK_DIR="work_patcher_$(date +%s)"
 OUTPUT_DEB="${BASE_NAME}_roothide.deb"
 
-# Check required commands
-for cmd in dpkg-deb ar tar awk sed ldid install_name_tool otool; do
-    if ! command -v "$cmd" &> /dev/null; then
-        echo "[-] Error: Required command '$cmd' is not installed."
-        exit 1
-    fi
-done
-
-echo "[*] Initializing workspace..."
-mkdir -p "$WORK_DIR/pkg" "$WORK_DIR/extracted"
+echo "[*] Unpacking package..."
+mkdir -p "$WORK_DIR/pkg"
 dpkg-deb -R "$INPUT_DEB" "$WORK_DIR/pkg"
 
 CONTROL_FILE="$WORK_DIR/pkg/DEBIAN/control"
-if [ ! -f "$CONTROL_FILE" ]; then
-    echo "[-] Error: DEBIAN/control not found!"
-    rm -rf "$WORK_DIR"
-    exit 1
+
+echo "[*] Patching control metadata..."
+sed -i 's/^Architecture:.*/Architecture: iphoneos-arm64e/I' "$CONTROL_FILE"
+
+# Clean any existing Pre-Depends patches- tags
+sed -i '/^Pre-Depends:.*patches-/d' "$CONTROL_FILE"
+
+# Append ~roothide tag
+CURRENT_VER=$(grep -i "^Version:" "$CONTROL_FILE" | head -n 1 | awk '{print $2}')
+if [[ "$CURRENT_VER" != *"~roothide"* ]]; then
+    sed -i "s/^Version:.*/Version: ${CURRENT_VER}~roothide/I" "$CONTROL_FILE"
 fi
 
-echo "[*] Step 1: Adjusting DEBIAN/control metadata..."
-# Update Architecture
-if grep -qi "^Architecture:" "$CONTROL_FILE"; then
-    sed -i 's/^Architecture:.*/Architecture: iphoneos-arm64e/I' "$CONTROL_FILE"
-else
-    echo "Architecture: iphoneos-arm64e" >> "$CONTROL_FILE"
-fi
-
-# Append ~roothide to version
-CURRENT_VERSION=$(grep -i "^Version:" "$CONTROL_FILE" | head -n 1 | awk '{print $2}')
-if [[ "$CURRENT_VERSION" != *"~roothide"* ]]; then
-    NEW_VERSION="${CURRENT_VERSION}~roothide"
-    sed -i "s/^Version:.*/Version: $NEW_VERSION/I" "$CONTROL_FILE"
-fi
-
-# Ensure standard RootHide dependencies without creating phantom 'patches-' dependencies
-if grep -qi "^Depends:" "$CONTROL_FILE"; then
-    if ! grep -q "mobilesubstrate" "$CONTROL_FILE"; then
-        sed -i 's/^Depends: */Depends: mobilesubstrate (>= 0.9.5000), /' "$CONTROL_FILE"
-    fi
-fi
-
-echo "[*] Step 2: Processing Mach-O binaries and dylibs..."
-# Find all executables, dylibs, and bundles to rewrite link paths for RootHide
+echo "[*] Patching Mach-O binaries..."
 find "$WORK_DIR/pkg" -type f | while read -r file; do
-    # Check if it's a Mach-O file using file command or otool header check
     if otool -h "$file" &> /dev/null; then
-        echo "    -> Patching Mach-O headers in: $(basename "$file")"
+        echo "    Processing: $(basename "$file")"
         
-        # Rewrite absolute /var/jb or /Library reference paths to use dynamic @loader_path/.jbroot mapping
-        # RootHide expects dependencies to point through @loader_path/.jbroot/
-        otool -L "$file" | awk '{print $1}' | grep -E '^(/var/jb|/Library|/usr)' | while read -r old_path; do
-            new_path="\@loader_path/.jbroot${old_path#/var/jb}"
-            # Handle rootful style paths if package originated from rootful
-            new_path=$(echo "$new_path" | sed 's|@loader_path/.jbroot/Library|@loader_path/.jbroot/var/jb/Library|g')
-            
-            echo "       Replacing dependency: $old_path -> $new_path"
-            install_name_tool -change "$old_path" "$new_path" "$file" 2>/dev/null || true
+        # Extract linked libraries and replace with valid @loader_path/.jbroot links
+        otool -L "$file" | awk 'NR>1 {print $1}' | while read -r lib; do
+            case "$lib" in
+                /Library/*|/usr/lib/*|/var/jb/*|\\@loader_path/*)
+                    # Clean any leading backslashes or /var/jb prefixes
+                    clean_lib="${lib#\\}"
+                    clean_lib="${clean_lib#/var/jb}"
+                    
+                    target="@loader_path/.jbroot${clean_lib}"
+                    
+                    echo "       $lib -> $target"
+                    install_name_tool -change "$lib" "$target" "$file" 2>/dev/null || true
+                    ;;
+            esac
         done
         
-        # Set a proper rpath if missing
+        # Add RootHide fallback rpaths
         install_name_tool -add_rpath "@loader_path/.jbroot/usr/lib" "$file" 2>/dev/null || true
-
-        # Re-sign the binary using ldid with ad-hoc/root-sandbox signatures
-        if command -v ldid &> /dev/null; then
-            ldid -S "$file" 2>/dev/null || true
-        fi
+        install_name_tool -add_rpath "@loader_path/.jbroot/Library/Frameworks" "$file" 2>/dev/null || true
+        
+        # Strip and resign cleanly
+        ldid -S "$file" 2>/dev/null || true
     fi
 done
 
-echo "[*] Step 3: Setting correct permissions on maintainer scripts..."
+echo "[*] Setting file permissions..."
 find "$WORK_DIR/pkg/DEBIAN" -type f ! -name "control" -exec chmod 755 {} +
 
-echo "[*] Step 4: Repackaging into RootHide-compliant .deb..."
+echo "[*] Packing final .deb..."
 dpkg-deb -Zxz --root-owner-group -b "$WORK_DIR/pkg" "$OUTPUT_DEB"
 
-# Cleanup
 rm -rf "$WORK_DIR"
-echo "[+] Success! Created package: $OUTPUT_DEB"
+echo "[+] Done: $OUTPUT_DEB"
